@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GTM Container Generator - Shopify & WordPress Tracking Booster</title>
+  <meta name="description" content="Easily generate Google Tag Manager containers with dynamic pixel integrations for Facebook, TikTok, Pinterest, and Google Ads. Ready for Shopify and WordPress!" />
+  <meta name="author" content="GTM Container Generator" />
+  <meta property="og:title" content="GTM Container Generator - Shopify & WordPress Tracking Booster" />
+  <meta property="og:description" content="Easily generate Google Tag Manager containers with dynamic pixel integrations for Facebook, TikTok, Pinterest, and Google Ads. Ready for Shopify and WordPress!" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="favicon.png" />
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <!-- PayPal SDK -->
+  <script src="https://www.paypal.com/sdk/js?client-id=YOUR_PAYPAL_CLIENT_ID&currency=USD"></script>
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){ dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-XXXXXXXXXX');
+
+    function trackEvent(action, category, label) {
+      gtag('event', action, {
+        'event_category': category,
+        'event_label': label,
+      });
+    }
+  </script>
+  <style>
+    body { margin: 0; font-family: 'Inter', sans-serif; background: #f8fafc; color: #333; line-height: 1.6; }
+    header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2rem 1rem; text-align: center; }
+    header h1 { margin-bottom: 0.5rem; font-size: 2.2rem; }
+    header p { margin: 0; font-size: 1.1rem; }
+    section.features { padding: 2rem 1rem; text-align: center; }
+    section.features h2 { color: #4f46e5; margin-bottom: 1rem; font-size: 1.8rem; }
+    .features-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.5rem; }
+    .feature { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1); max-width: 250px; }
+    main { padding: 2rem 1rem; display: flex; justify-content: center; }
+    .container { background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); width: 100%; max-width: 600px; position: relative; }
+    input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
+    button { background-color: #4f46e5; color: white; border: none; padding: 0.75rem; border-radius: 8px; width: 100%; cursor: pointer; font-size: 1rem; transition: background-color 0.3s ease; margin-bottom: 0.5rem; }
+    button:hover { background-color: #4338ca; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 8px; max-height: 200px; overflow: auto; margin-top: 1rem; font-size: 0.8rem; }
+    .error { color: red; margin-bottom: 1rem; text-align: center; }
+    footer { text-align: center; padding: 1rem; background: #e2e8f0; color: #555; }
+    .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); z-index: 1000; display: none; }
+    .modal.show { display: block; }
+    .modal p { margin: 0 0 1rem 0; }
+    .modal button { width: auto; margin-top: 0; }
+  </style>
+</head>
+<body>
+  <div id="paypal-button-container" style="max-width:600px; margin: 20px auto;"></div>
+
+  <script>
+    paypal.Buttons({
+      createOrder: function(data, actions) {
+        trackEvent('click', 'checkout', 'PayPal Checkout Start');
+        return actions.order.create({
+          purchase_units: [{
+            amount: {
+              value: '199.00'
+            }
+          }]
+        });
+      },
+      onApprove: function(data, actions) {
+        return actions.order.capture().then(function(details) {
+          trackEvent('purchase', 'payment', 'PayPal Purchase Success');
+          alert('Transaction completed by ' + details.payer.name.given_name);
+          generateContainer();
+        });
+      },
+      onCancel: function (data) {
+        alert('Payment cancelled');
+      },
+      onError: function (err) {
+        console.error(err);
+        alert('An error occurred during the transaction.');
+      }
+    }).render('#paypal-button-container');
+
+    function saveAs(blob, fileName) {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function showModal() {
+      document.getElementById('successModal').classList.add('show');
+    }
+
+    function closeModal() {
+      document.getElementById('successModal').classList.remove('show');
+    }
+
+    function buildPixelTags({ fbPixelId, pinterestPixelId, tiktokPixelId }) {
+      const tags = [];
+      if (fbPixelId) tags.push({ name: 'Facebook Pixel - Base', type: 'html', parameter: [{ key: 'html', type: 'TEMPLATE', value: `<script>...</script>` }], firingTriggerId: ['2147479553'] });
+      if (pinterestPixelId) tags.push({ name: 'Pinterest Tag - Base', type: 'html', parameter: [{ key: 'html', type: 'TEMPLATE', value: `<script>...</script>` }], firingTriggerId: ['2147479553'] });
+      if (tiktokPixelId) tags.push({ name: 'TikTok Pixel - Base', type: 'html', parameter: [{ key: 'html', type: 'TEMPLATE', value: `<script>...</script>` }], firingTriggerId: ['2147479553'] });
+      return tags;
+    }
+
+    function generateContainer() {
+      trackEvent('download', 'container', 'GTM Container Downloaded');
+      const errorEl = document.getElementById('error');
+      if (errorEl) errorEl.textContent = '';
+
+      const gaMeasurementId = document.getElementById('gaMeasurementId')?.value.trim();
+      const gtmContainerId = document.getElementById('gtmContainerId')?.value.trim();
+      const fbPixelId = document.getElementById('fbPixelId')?.value.trim();
+      const pinterestPixelId = document.getElementById('pinterestPixelId')?.value.trim();
+      const tiktokPixelId = document.getElementById('tiktokPixelId')?.value.trim();
+
+      if (!gaMeasurementId || !gtmContainerId) {
+        if (errorEl) errorEl.textContent = 'Google Ads Measurement ID and GTM Container ID are required!';
+        return;
+      }
+
+      fetch('GTM-Import.json').then(response => response.json()).then(template => {
+        const updatedTemplate = JSON.parse(JSON.stringify(template));
+
+        updatedTemplate.containerVersion.variable.forEach(variable => {
+          if (variable.name === 'Measure ID') {
+            variable.parameter.forEach(param => {
+              if (param.key === 'value') {
+                param.value = gaMeasurementId;
+              }
+            });
+          }
+        });
+
+        updatedTemplate.containerVersion.container.publicId = gtmContainerId;
+        const pixelTags = buildPixelTags({ fbPixelId, pinterestPixelId, tiktokPixelId });
+        updatedTemplate.containerVersion.tag.push(...pixelTags);
+
+        const finalJson = JSON.stringify(updatedTemplate, null, 2);
+        document.getElementById('preview')?.textContent = finalJson;
+        const blob = new Blob([finalJson], { type: 'application/json' });
+        saveAs(blob, 'GTM-Custom-Container.json');
+        showModal();
+      }).catch(err => {
+        console.error(err);
+        if (errorEl) errorEl.textContent = 'An error occurred while generating the container.';
+      });
+    }
+  </script>
+</body>
+</html>
