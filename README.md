@@ -1,21 +1,18 @@
 # GTM Container Generator Backend 🎉
 
-This backend powers your GTM Container Generator website.  
-✅ Handles Stripe payments  
-✅ Sends confirmation emails with one-time secure download links  
-✅ Sends PDF receipts  
-✅ Reports purchases to Google Analytics 4
+Backend for your PayPal-based GTM Container Generator.
 
-## Tech stack
-- Node.js + Express
-- Stripe Webhook
-- Nodemailer (Gmail SMTP)
-- Google Analytics Measurement Protocol
-- PDFKit (for receipts)
+## Features
+- ✅ PayPal webhook (manual listener)
+- ✅ Confirmation emails with download link
+- ✅ PDF receipt generation
+- ✅ Secure one-time download links
+- ✅ Google Analytics tracking
 
 ## Setup
 
-1. Clone this repository and go to `/backend/`:
+1. Install dependencies:
 ```bash
 cd backend
 npm install
+
