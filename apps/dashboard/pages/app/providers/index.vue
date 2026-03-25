@@ -2,7 +2,10 @@
   <div class="providers fade-slide-in">
     <div class="providers__header">
       <h2 class="providers__count mono">{{ providers.length }} providers</h2>
-      <button class="btn-primary" @click="showAdd = true">Add Provider</button>
+      <button class="btn-primary" @click="showAdd = true">
+        <Plus :size="14" />
+        Add Provider
+      </button>
     </div>
 
     <div class="providers__grid">
@@ -22,13 +25,19 @@
         </div>
 
         <div class="providers__models">
-          <span
-            v-for="model in provider.models"
-            :key="model"
-            class="providers__model-badge mono"
-          >
-            {{ model }}
+          <span class="providers__models-label">
+            <Cpu :size="12" />
+            <span class="mono">{{ provider.models.length }}</span> models available
           </span>
+          <div class="providers__model-list">
+            <span
+              v-for="model in provider.models"
+              :key="model"
+              class="providers__model-badge mono"
+            >
+              {{ model }}
+            </span>
+          </div>
         </div>
 
         <div class="providers__card-stats">
@@ -44,6 +53,23 @@
             <span class="providers__stat-label">Last Tested</span>
             <span class="providers__stat-value" style="font-size: 0.75rem; color: var(--text-secondary)">{{ provider.lastTested }}</span>
           </div>
+          <div class="providers__stat">
+            <span class="providers__stat-label">Test Status</span>
+            <span class="providers__stat-value">
+              <StatusDot
+                :color="provider.testStatus === 'pass' ? 'success' : provider.testStatus === 'fail' ? 'danger' : 'neutral'"
+              />
+              <span
+                class="mono"
+                :style="{
+                  fontSize: '0.75rem',
+                  color: provider.testStatus === 'pass' ? 'var(--success)' : provider.testStatus === 'fail' ? 'var(--danger)' : 'var(--text-muted)'
+                }"
+              >
+                {{ provider.testStatus === 'pass' ? 'Passed' : provider.testStatus === 'fail' ? 'Failed' : 'Untested' }}
+              </span>
+            </span>
+          </div>
         </div>
 
         <div class="providers__card-actions">
@@ -53,9 +79,13 @@
             :disabled="provider.testing"
             @click="testConnection(provider.id)"
           >
+            <Loader2 v-if="provider.testing" :size="13" class="spin" />
             {{ provider.testing ? 'Testing...' : 'Test Connection' }}
           </button>
-          <button class="btn-ghost" style="flex: 1; height: 32px; font-size: 0.75rem" @click="editProvider(provider.id)">Configure</button>
+          <button class="btn-ghost" style="flex: 1; height: 32px; font-size: 0.75rem" @click="editProvider(provider.id)">
+            <Settings :size="13" />
+            Configure
+          </button>
         </div>
       </div>
     </div>
@@ -94,6 +124,17 @@
             <option value="fallback">Fallback</option>
           </select>
         </div>
+
+        <button
+          class="providers__test-btn"
+          :class="{ 'providers__test-btn--pass': testResult === 'pass', 'providers__test-btn--fail': testResult === 'fail' }"
+          :disabled="!addForm.apiKey || testingNew"
+          @click="testNewConnection"
+        >
+          <Loader2 v-if="testingNew" :size="14" class="spin" />
+          <Zap v-else :size="14" />
+          {{ testingNew ? 'Testing...' : testResult === 'pass' ? 'Connection Successful' : testResult === 'fail' ? 'Connection Failed &mdash; Retry' : 'Test Connection' }}
+        </button>
       </div>
       <template #footer>
         <button class="btn-ghost" @click="showAdd = false">Cancel</button>
@@ -104,9 +145,13 @@
 </template>
 
 <script setup lang="ts">
+import { Plus, Cpu, Settings, Loader2, Zap } from 'lucide-vue-next'
+
 definePageMeta({ layout: 'default' })
 
 const showAdd = ref(false)
+const testingNew = ref(false)
+const testResult = ref<'pass' | 'fail' | null>(null)
 
 const addForm = reactive({
   provider: '',
@@ -125,6 +170,7 @@ interface Provider {
   uptime: string
   avgLatency: number
   lastTested: string
+  testStatus: 'pass' | 'fail' | 'untested'
   testing: boolean
 }
 
@@ -138,6 +184,7 @@ const providers = ref<Provider[]>([
     uptime: '99.98%',
     avgLatency: 42,
     lastTested: '12 seconds ago',
+    testStatus: 'pass',
     testing: false,
   },
   {
@@ -149,17 +196,19 @@ const providers = ref<Provider[]>([
     uptime: '99.95%',
     avgLatency: 67,
     lastTested: '12 seconds ago',
+    testStatus: 'pass',
     testing: false,
   },
   {
     id: 'google',
     name: 'Google AI',
     endpoint: 'generativelanguage.googleapis.com/v1',
-    connected: true,
+    connected: false,
     models: ['gemini-2.0-flash', 'gemini-2.0-pro', 'text-embedding-004'],
-    uptime: '100%',
-    avgLatency: 38,
-    lastTested: '12 seconds ago',
+    uptime: '\u2014',
+    avgLatency: 0,
+    lastTested: 'Never',
+    testStatus: 'untested',
     testing: false,
   },
   {
@@ -168,9 +217,10 @@ const providers = ref<Provider[]>([
     endpoint: 'api.mistral.ai/v1',
     connected: false,
     models: ['mistral-large', 'mistral-medium', 'mistral-small'],
-    uptime: '—',
+    uptime: '\u2014',
     avgLatency: 0,
     lastTested: 'Never',
+    testStatus: 'untested',
     testing: false,
   },
 ])
@@ -191,9 +241,19 @@ function testConnection(id: string) {
     provider.testing = false
     provider.connected = true
     provider.lastTested = 'Just now'
+    provider.testStatus = 'pass'
     if (provider.avgLatency === 0) provider.avgLatency = 89
-    if (provider.uptime === '—') provider.uptime = '99.90%'
+    if (provider.uptime === '\u2014') provider.uptime = '99.90%'
   }, 1500)
+}
+
+function testNewConnection() {
+  testingNew.value = true
+  testResult.value = null
+  setTimeout(() => {
+    testingNew.value = false
+    testResult.value = 'pass'
+  }, 1200)
 }
 
 function editProvider(id: string) {
@@ -219,6 +279,7 @@ function addProvider() {
   if (existing) {
     existing.connected = true
     existing.lastTested = 'Just now'
+    existing.testStatus = 'pass'
   } else {
     providers.value.push({
       id: addForm.provider,
@@ -226,9 +287,10 @@ function addProvider() {
       endpoint: addForm.baseUrl || `api.${addForm.provider}.com/v1`,
       connected: true,
       models: [],
-      uptime: '—',
+      uptime: '\u2014',
       avgLatency: 0,
       lastTested: 'Just now',
+      testStatus: 'pass',
       testing: false,
     })
   }
@@ -239,6 +301,7 @@ function addProvider() {
   addForm.baseUrl = ''
   addForm.orgId = ''
   addForm.priority = 'primary'
+  testResult.value = null
 }
 </script>
 
@@ -304,6 +367,20 @@ function addProvider() {
 
 .providers__models {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.providers__models-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.providers__model-list {
+  display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
@@ -319,8 +396,8 @@ function addProvider() {
 
 .providers__card-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
 }
 
 .providers__stat {
@@ -340,6 +417,9 @@ function addProvider() {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .providers__card-actions {
@@ -372,5 +452,53 @@ function addProvider() {
 .providers__field input,
 .providers__field select {
   width: 100%;
+}
+
+.providers__test-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-base);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.providers__test-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.providers__test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.providers__test-btn--pass {
+  color: var(--success);
+  border-color: rgba(0, 217, 126, 0.3);
+  background: rgba(0, 217, 126, 0.08);
+}
+
+.providers__test-btn--fail {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>
