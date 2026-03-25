@@ -1,0 +1,191 @@
+/* NeuralGate Animations */
+
+/* Shimmer loading skeleton */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface) 25%,
+    var(--bg-overlay) 50%,
+    var(--bg-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease infinite;
+  border-radius: 4px;
+}
+
+/* Pulse for status dots */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Live pulse ring */
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+/* Fade slide in (page transitions) */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-in {
+  animation: fadeSlideIn 80ms ease both;
+}
+
+/* Count up number animation handled via JS */
+/* But provide the base class for smooth rendering */
+.count-up {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+}
+
+/* Chart enter animation */
+@keyframes chartEnter {
+  from {
+    opacity: 0;
+    transform: scaleY(0.95);
+    transform-origin: bottom;
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.chart-enter {
+  animation: chartEnter 400ms ease-out both;
+}
+
+/* Row flash for new live items */
+@keyframes rowFlash {
+  0% { background: var(--success-muted); }
+  100% { background: transparent; }
+}
+
+.row-flash {
+  animation: rowFlash 1s ease-out both;
+}
+
+/* Error row flash */
+@keyframes rowFlashError {
+  0% { background: var(--danger-muted); }
+  100% { background: transparent; }
+}
+
+.row-flash-error {
+  animation: rowFlashError 1s ease-out both;
+}
+
+/* Slide over panel */
+@keyframes slideOverIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slideOverOut {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+.slide-over-enter {
+  animation: slideOverIn 200ms ease both;
+}
+
+.slide-over-leave {
+  animation: slideOverOut 200ms ease both;
+}
+
+/* Toast enter */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-enter {
+  animation: toastIn 150ms ease both;
+}
+
+/* Progress bar fill */
+@keyframes progressFill {
+  from { width: 0%; }
+}
+
+.progress-animate {
+  animation: progressFill 600ms ease-out both;
+}
+
+/* Sparkle animation for savings */
+@keyframes sparkle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+.sparkle {
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+/* Grid background animation for hero */
+@keyframes gridFade {
+  0%, 100% { opacity: 0.03; }
+  50% { opacity: 0.06; }
+}
+
+/* Floating particles */
+@keyframes float {
+  0%, 100% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-10px) translateX(5px); }
+  50% { transform: translateY(-5px) translateX(-5px); }
+  75% { transform: translateY(-15px) translateX(3px); }
+}
+
+/* Page transition */
+.page-enter-active {
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+
+.page-leave-active {
+  transition: opacity 60ms ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.page-leave-to {
+  opacity: 0;
+}

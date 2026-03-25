@@ -1,0 +1,92 @@
+/* NeuralGate Design Tokens — "Precision Instrument" */
+
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('/fonts/BerkeleyMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('/fonts/BerkeleyMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Backgrounds — layered depth system */
+  --bg-base: #050507;
+  --bg-surface: #0d0d12;
+  --bg-elevated: #141419;
+  --bg-overlay: #1a1a22;
+  --bg-subtle: #1f1f28;
+
+  /* Borders */
+  --border-base: #1e1e28;
+  --border-strong: #2a2a38;
+  --border-focus: #4f4faa;
+
+  /* Primary — electric indigo */
+  --primary: #5b5ef4;
+  --primary-hover: #6b6ef9;
+  --primary-muted: #5b5ef415;
+  --primary-glow: 0 0 20px #5b5ef440;
+
+  /* Semantic */
+  --success: #00d97e;
+  --success-muted: #00d97e15;
+  --warning: #f5a623;
+  --warning-muted: #f5a62315;
+  --danger: #ff4757;
+  --danger-muted: #ff475715;
+  --info: #00b4d8;
+
+  /* Text */
+  --text-primary: #ededf0;
+  --text-secondary: #8888a0;
+  --text-muted: #55556a;
+  --text-disabled: #333340;
+
+  /* Special */
+  --gradient-brand: linear-gradient(135deg, #5b5ef4, #a855f7);
+
+  /* Typography */
+  --font-mono: 'Berkeley Mono', 'JetBrains Mono', monospace;
+  --font-ui: 'Geist', -apple-system, sans-serif;
+  --font-code: 'JetBrains Mono', monospace;
+
+  /* Spacing — 4px base grid */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --topbar-height: 48px;
+  --row-height: 44px;
+  --card-padding: 16px;
+  --card-radius: 8px;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 400ms ease-out;
+
+  /* Z-index */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-overlay: 20;
+  --z-modal: 30;
+  --z-toast: 40;
+  --z-command: 50;
+}
