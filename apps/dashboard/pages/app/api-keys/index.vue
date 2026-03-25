@@ -2,7 +2,10 @@
   <div class="api-keys fade-slide-in">
     <div class="api-keys__header">
       <h2 class="api-keys__count mono">{{ apiKeys.length }} keys</h2>
-      <button class="btn-primary" @click="showCreate = true">Create Key</button>
+      <button class="btn-primary" @click="showCreate = true">
+        <Plus :size="14" />
+        Create Key
+      </button>
     </div>
 
     <DataTable :columns="columns" :rows="apiKeys">
@@ -11,7 +14,7 @@
       </template>
       <template #cell-vertical="{ value }">
         <span v-if="value" class="api-keys__vertical-badge">{{ value }}</span>
-        <span v-else class="text-muted" style="font-size: 0.75rem">—</span>
+        <span v-else class="text-muted" style="font-size: 0.75rem">&mdash;</span>
       </template>
       <template #cell-lastUsed="{ value }">
         <span class="text-secondary" style="font-size: 0.75rem">{{ value }}</span>
@@ -30,8 +33,14 @@
       </template>
       <template #cell-actions="{ row }">
         <div class="api-keys__actions">
-          <button class="btn-ghost api-keys__action-btn" @click="revokeKey(row.id)">Revoke</button>
-          <button class="btn-ghost api-keys__action-btn" @click="rotateKey(row.id)">Rotate</button>
+          <button class="btn-ghost api-keys__action-btn" @click="editKey(row.id)">
+            <Pencil :size="13" />
+            Edit
+          </button>
+          <button class="btn-ghost api-keys__action-btn api-keys__action-btn--danger" @click="deleteKey(row.id)">
+            <Trash2 :size="13" />
+            Delete
+          </button>
         </div>
       </template>
     </DataTable>
@@ -48,7 +57,7 @@
           <select v-model="form.vertical">
             <option value="">General</option>
             <option value="ecommerce">Ecommerce</option>
-            <option value="hr">HR & Recruitment</option>
+            <option value="hr">HR &amp; Recruitment</option>
             <option value="healthtech">HealthTech</option>
             <option value="fintech">FinTech</option>
           </select>
@@ -58,8 +67,22 @@
           <input v-model="form.rateLimit" type="number" placeholder="1000" />
         </div>
         <div class="api-keys__field">
-          <label class="api-keys__field-label">Monthly Budget (&pound;)</label>
+          <label class="api-keys__field-label">Monthly Budget Cap (&pound;)</label>
           <input v-model="form.monthlyBudget" type="number" placeholder="500" />
+        </div>
+        <div class="api-keys__field">
+          <label class="api-keys__field-label">Allowed Providers</label>
+          <div class="api-keys__checkbox-group">
+            <label v-for="p in providerOptions" :key="p" class="api-keys__checkbox-label">
+              <input
+                type="checkbox"
+                :value="p"
+                :checked="form.allowedProviders.includes(p)"
+                @change="toggleProvider(p)"
+              />
+              {{ p }}
+            </label>
+          </div>
         </div>
         <div class="api-keys__field">
           <label class="api-keys__field-label">Expiry</label>
@@ -81,57 +104,93 @@
     <SlideOver v-model="showKeyCreated" title="API Key Created">
       <div class="api-keys__created">
         <p class="text-secondary" style="font-size: 0.8125rem; margin-bottom: 16px; line-height: 1.5">
-          Your API key has been created. Copy it now — you will not be able to see it again.
+          Your API key has been created. Copy it now &mdash; you will not be able to see it again.
         </p>
         <div class="api-keys__key-display">
           <span class="mono">{{ createdKey }}</span>
           <button class="api-keys__copy-btn" @click="copyKey">
+            <component :is="copied ? Check : ClipboardCopy" :size="14" />
             {{ copied ? 'Copied!' : 'Copy' }}
           </button>
         </div>
+        <button
+          v-if="!confirmed"
+          class="api-keys__confirm-btn"
+          @click="confirmed = true"
+        >
+          <ShieldCheck :size="14" />
+          I've copied this key
+        </button>
+        <div v-else class="api-keys__confirmed">
+          <ShieldCheck :size="14" />
+          Key saved &mdash; you're all set
+        </div>
+
         <div class="api-keys__key-warning">
+          <AlertTriangle :size="14" />
           Store this key securely. It will only be shown once.
+        </div>
+
+        <!-- Integration snippets -->
+        <div class="api-keys__snippets">
+          <h4 class="api-keys__snippets-title">Integration</h4>
+          <CodeBlock
+            :code="integrationSnippets"
+            :tabs="['Node.js', 'Python', 'curl']"
+          />
         </div>
       </div>
       <template #footer>
-        <button class="btn-primary" @click="showKeyCreated = false">Done</button>
+        <button class="btn-primary" :disabled="!confirmed" @click="showKeyCreated = false">Done</button>
       </template>
     </SlideOver>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Plus, Pencil, Trash2, ClipboardCopy, Check, ShieldCheck, AlertTriangle } from 'lucide-vue-next'
+
 definePageMeta({ layout: 'default' })
 
 const showCreate = ref(false)
 const showKeyCreated = ref(false)
 const createdKey = ref('')
 const copied = ref(false)
+const confirmed = ref(false)
+
+const providerOptions = ['OpenAI', 'Anthropic', 'Google', 'Mistral']
 
 const form = reactive({
   name: '',
   vertical: '',
   rateLimit: '',
   monthlyBudget: '',
+  allowedProviders: ['OpenAI', 'Anthropic', 'Google', 'Mistral'] as string[],
   expiry: 'never',
 })
 
+function toggleProvider(p: string) {
+  const idx = form.allowedProviders.indexOf(p)
+  if (idx >= 0) form.allowedProviders.splice(idx, 1)
+  else form.allowedProviders.push(p)
+}
+
 const columns = [
   { key: 'name', label: 'Name', sortable: true },
-  { key: 'prefix', label: 'Prefix', width: '120px' },
+  { key: 'prefix', label: 'Prefix', width: '130px' },
   { key: 'vertical', label: 'Vertical', width: '110px' },
   { key: 'lastUsed', label: 'Last Used', width: '120px', sortable: true },
   { key: 'requests30d', label: 'Requests 30d', width: '120px', align: 'right' as const, sortable: true },
   { key: 'cost30d', label: 'Cost 30d', width: '100px', align: 'right' as const, sortable: true },
   { key: 'status', label: 'Status', width: '100px' },
-  { key: 'actions', label: '', width: '140px', align: 'right' as const },
+  { key: 'actions', label: '', width: '170px', align: 'right' as const },
 ]
 
 const apiKeys = ref([
   {
     id: 'key-1',
     name: 'Production Backend',
-    prefix: 'ng_live_8f2a…',
+    prefix: 'ng_live_8f2a\u2026',
     vertical: 'ecommerce',
     lastUsed: '2 minutes ago',
     requests30d: 284729,
@@ -141,7 +200,7 @@ const apiKeys = ref([
   {
     id: 'key-2',
     name: 'Staging Environment',
-    prefix: 'ng_test_c91b…',
+    prefix: 'ng_test_c91b\u2026',
     vertical: null,
     lastUsed: '14 hours ago',
     requests30d: 12483,
@@ -151,24 +210,44 @@ const apiKeys = ref([
   {
     id: 'key-3',
     name: 'ML Pipeline',
-    prefix: 'ng_live_3d7e…',
+    prefix: 'ng_live_3d7e\u2026',
     vertical: 'healthtech',
     lastUsed: '3 days ago',
     requests30d: 89201,
     cost30d: '156.80',
     status: 'active',
   },
-  {
-    id: 'key-4',
-    name: 'Legacy Integration',
-    prefix: 'ng_live_a02f…',
-    vertical: 'hr',
-    lastUsed: '28 days ago',
-    requests30d: 340,
-    cost30d: '1.20',
-    status: 'expired',
-  },
 ])
+
+const integrationSnippets = computed<Record<string, string>>(() => ({
+  'Node.js': `const neuralgate = require('@neuralgate/sdk')
+
+const client = neuralgate.init({
+  apiKey: '${createdKey.value}'
+})
+
+const response = await client.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Hello!' }]
+})`,
+  'Python': `import neuralgate
+
+client = neuralgate.Client(
+    api_key="${createdKey.value}"
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}]
+)`,
+  'curl': `curl -X POST https://api.neuralgate.dev/v1/chat/completions \\
+  -H "Authorization: Bearer ${createdKey.value}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'`,
+}))
 
 function createKey() {
   const prefix = `ng_live_${Math.random().toString(36).substring(2, 6)}`
@@ -177,7 +256,7 @@ function createKey() {
   apiKeys.value.unshift({
     id: `key-${Date.now()}`,
     name: form.name || 'Unnamed Key',
-    prefix: `${prefix}…`,
+    prefix: `${prefix}\u2026`,
     vertical: form.vertical || null,
     lastUsed: 'Just now',
     requests30d: 0,
@@ -188,11 +267,13 @@ function createKey() {
   showCreate.value = false
   showKeyCreated.value = true
   copied.value = false
+  confirmed.value = false
 
   form.name = ''
   form.vertical = ''
   form.rateLimit = ''
   form.monthlyBudget = ''
+  form.allowedProviders = ['OpenAI', 'Anthropic', 'Google', 'Mistral']
   form.expiry = 'never'
 }
 
@@ -202,20 +283,16 @@ function copyKey() {
   setTimeout(() => { copied.value = false }, 2000)
 }
 
-function revokeKey(id: string) {
+function editKey(id: string) {
   const key = apiKeys.value.find(k => k.id === id)
-  if (key) key.status = 'revoked'
+  if (!key) return
+  form.name = key.name
+  form.vertical = key.vertical || ''
+  showCreate.value = true
 }
 
-function rotateKey(id: string) {
-  const key = apiKeys.value.find(k => k.id === id)
-  if (key) {
-    const prefix = `ng_live_${Math.random().toString(36).substring(2, 6)}`
-    key.prefix = `${prefix}…`
-    createdKey.value = `${prefix}_${Math.random().toString(36).substring(2, 14)}${Math.random().toString(36).substring(2, 14)}`
-    showKeyCreated.value = true
-    copied.value = false
-  }
+function deleteKey(id: string) {
+  apiKeys.value = apiKeys.value.filter(k => k.id !== id)
 }
 </script>
 
@@ -238,6 +315,7 @@ function rotateKey(id: string) {
   background: var(--bg-elevated);
   padding: 2px 8px;
   border-radius: 4px;
+  text-transform: capitalize;
 }
 
 .api-keys__status {
@@ -262,6 +340,13 @@ function rotateKey(id: string) {
   font-size: 0.6875rem !important;
   padding: 3px 8px !important;
   height: auto !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.api-keys__action-btn--danger:hover {
+  color: var(--danger) !important;
 }
 
 .api-keys__form {
@@ -289,6 +374,27 @@ function rotateKey(id: string) {
   width: 100%;
 }
 
+.api-keys__checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.api-keys__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.api-keys__checkbox-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+}
+
 .api-keys__created {
   display: flex;
   flex-direction: column;
@@ -307,7 +413,8 @@ function rotateKey(id: string) {
 }
 
 .api-keys__key-display .mono {
-  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
   color: var(--primary);
   word-break: break-all;
   line-height: 1.6;
@@ -323,6 +430,9 @@ function rotateKey(id: string) {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   transition: opacity var(--transition-fast);
 }
 
@@ -330,12 +440,67 @@ function rotateKey(id: string) {
   opacity: 0.85;
 }
 
+.api-keys__confirm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-base);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.api-keys__confirm-btn:hover {
+  background: var(--bg-overlay);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.api-keys__confirmed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(0, 217, 126, 0.08);
+  border: 1px solid rgba(0, 217, 126, 0.2);
+}
+
 .api-keys__key-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.75rem;
   color: var(--warning);
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.2);
   border-radius: 6px;
   padding: 10px 12px;
+  margin-bottom: 20px;
+}
+
+.api-keys__snippets {
+  margin-top: 4px;
+}
+
+.api-keys__snippets-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
 }
 </style>
