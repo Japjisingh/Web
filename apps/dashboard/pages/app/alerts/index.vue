@@ -2,7 +2,10 @@
   <div class="alerts fade-slide-in">
     <div class="alerts__header">
       <h2 class="alerts__count mono">{{ alertRules.length }} alert rules</h2>
-      <button class="btn-primary" @click="showCreate = true">Create Alert</button>
+      <button class="btn-primary" @click="showCreate = true">
+        <Plus :size="14" />
+        Create Alert
+      </button>
     </div>
 
     <!-- Alert Rules List -->
@@ -12,13 +15,16 @@
           <div class="alerts__rule-info">
             <div class="alerts__rule-name-row">
               <h3 class="alerts__rule-name">{{ rule.name }}</h3>
-              <span class="alerts__type-badge" :class="`alerts__type-badge--${rule.type}`">{{ formatType(rule.type) }}</span>
+              <span class="alerts__type-badge" :class="`alerts__type-badge--${rule.type}`">{{ typeLabels[rule.type] }}</span>
             </div>
             <p class="alerts__rule-condition">{{ rule.condition }}</p>
           </div>
           <div class="alerts__rule-controls">
             <div class="alerts__channels">
-              <span v-for="ch in rule.channels" :key="ch" class="alerts__channel-badge" :class="`alerts__channel-badge--${ch}`">{{ ch }}</span>
+              <span v-for="ch in rule.channels" :key="ch" class="alerts__channel-badge" :class="`alerts__channel-badge--${ch}`">
+                <component :is="channelIcons[ch]" :size="11" />
+                {{ ch }}
+              </span>
             </div>
             <button
               class="alerts__toggle"
@@ -63,79 +69,133 @@
     <SlideOver v-model="showCreate" title="Create Alert Rule">
       <div class="alerts__form">
         <div class="alerts__field">
-          <label class="alerts__field-label">Alert Name</label>
-          <input v-model="form.name" type="text" placeholder="High cost alert" />
-        </div>
-        <div class="alerts__field">
-          <label class="alerts__field-label">Type</label>
+          <label class="alerts__field-label">Alert Type</label>
           <select v-model="form.type">
+            <option value="">Select type</option>
             <option value="cost_threshold">Cost Threshold</option>
             <option value="error_rate">Error Rate</option>
             <option value="latency_spike">Latency Spike</option>
+            <option value="budget_warning">Budget Warning</option>
           </select>
         </div>
         <div class="alerts__field">
-          <label class="alerts__field-label">
-            {{ form.type === 'cost_threshold' ? 'Cost Threshold (&pound;)' : form.type === 'error_rate' ? 'Error Rate (%)' : 'Latency Threshold (ms)' }}
-          </label>
-          <input
-            v-model="form.threshold"
-            type="number"
-            :placeholder="form.type === 'cost_threshold' ? '500' : form.type === 'error_rate' ? '5' : '1000'"
-          />
+          <label class="alerts__field-label">Name</label>
+          <input v-model="form.name" type="text" :placeholder="namePlaceholder" />
         </div>
+
+        <!-- Condition builder -->
         <div class="alerts__field">
-          <label class="alerts__field-label">Time Window</label>
-          <select v-model="form.window">
-            <option value="5m">5 minutes</option>
-            <option value="15m">15 minutes</option>
-            <option value="1h">1 hour</option>
-            <option value="24h">24 hours</option>
-          </select>
+          <label class="alerts__field-label">Condition</label>
+          <div class="alerts__condition-builder">
+            <template v-if="form.type === 'cost_threshold'">
+              <span class="text-secondary" style="font-size: 0.8125rem">When daily cost exceeds</span>
+              <div class="alerts__condition-input-group">
+                <span class="alerts__condition-prefix">&pound;</span>
+                <input v-model="form.threshold" type="number" placeholder="100" />
+              </div>
+            </template>
+            <template v-else-if="form.type === 'error_rate'">
+              <span class="text-secondary" style="font-size: 0.8125rem">When error rate exceeds</span>
+              <div class="alerts__condition-input-group">
+                <input v-model="form.threshold" type="number" placeholder="5" />
+                <span class="alerts__condition-suffix">%</span>
+              </div>
+              <span class="text-secondary" style="font-size: 0.8125rem">in a 5-minute window</span>
+            </template>
+            <template v-else-if="form.type === 'latency_spike'">
+              <span class="text-secondary" style="font-size: 0.8125rem">When p95 latency exceeds</span>
+              <div class="alerts__condition-input-group">
+                <input v-model="form.threshold" type="number" placeholder="2000" />
+                <span class="alerts__condition-suffix">ms</span>
+              </div>
+            </template>
+            <template v-else-if="form.type === 'budget_warning'">
+              <span class="text-secondary" style="font-size: 0.8125rem">When monthly spend reaches</span>
+              <div class="alerts__condition-input-group">
+                <input v-model="form.threshold" type="number" placeholder="80" />
+                <span class="alerts__condition-suffix">%</span>
+              </div>
+              <span class="text-secondary" style="font-size: 0.8125rem">of budget cap</span>
+            </template>
+            <template v-else>
+              <span class="text-muted" style="font-size: 0.8125rem">Select an alert type first</span>
+            </template>
+          </div>
         </div>
+
         <div class="alerts__field">
           <label class="alerts__field-label">Notification Channels</label>
           <div class="alerts__channel-options">
-            <label class="alerts__checkbox-label">
-              <input v-model="form.channels" type="checkbox" value="email" />
-              <span>Email</span>
-            </label>
-            <label class="alerts__checkbox-label">
-              <input v-model="form.channels" type="checkbox" value="slack" />
-              <span>Slack</span>
-            </label>
-            <label class="alerts__checkbox-label">
-              <input v-model="form.channels" type="checkbox" value="webhook" />
-              <span>Webhook</span>
+            <label v-for="ch in channelOptionsList" :key="ch" class="alerts__checkbox-label">
+              <input
+                type="checkbox"
+                :value="ch"
+                :checked="form.channels.includes(ch)"
+                @change="toggleChannel(ch)"
+              />
+              <component :is="channelIcons[ch]" :size="14" />
+              <span>{{ ch }}</span>
             </label>
           </div>
         </div>
       </div>
       <template #footer>
         <button class="btn-ghost" @click="showCreate = false">Cancel</button>
-        <button class="btn-primary" @click="createAlert">Create Alert</button>
+        <button class="btn-primary" :disabled="!form.type || !form.name" @click="createAlert">Create Alert</button>
       </template>
     </SlideOver>
   </div>
 </template>
 
 <script setup lang="ts">
+import { Plus, Mail, MessageSquare, Webhook } from 'lucide-vue-next'
+
 definePageMeta({ layout: 'default' })
 
 const showCreate = ref(false)
 
+const typeLabels: Record<string, string> = {
+  cost_threshold: 'Cost',
+  error_rate: 'Error Rate',
+  latency_spike: 'Latency',
+  budget_warning: 'Budget',
+}
+
+const channelIcons: Record<string, typeof Mail> = {
+  email: Mail,
+  slack: MessageSquare,
+  webhook: Webhook,
+}
+
+const channelOptionsList = ['email', 'slack', 'webhook']
+
 const form = reactive({
+  type: '',
   name: '',
-  type: 'cost_threshold',
   threshold: '',
-  window: '1h',
-  channels: [] as string[],
+  channels: ['email'] as string[],
 })
+
+const namePlaceholder = computed(() => {
+  switch (form.type) {
+    case 'cost_threshold': return 'Daily cost alert'
+    case 'error_rate': return 'High error rate'
+    case 'latency_spike': return 'Latency spike alert'
+    case 'budget_warning': return 'Budget 80% warning'
+    default: return 'My alert rule'
+  }
+})
+
+function toggleChannel(ch: string) {
+  const idx = form.channels.indexOf(ch)
+  if (idx >= 0) form.channels.splice(idx, 1)
+  else form.channels.push(ch)
+}
 
 interface AlertRule {
   id: string
   name: string
-  type: 'cost_threshold' | 'error_rate' | 'latency_spike'
+  type: string
   condition: string
   channels: string[]
   active: boolean
@@ -156,7 +216,7 @@ const alertRules = ref<AlertRule[]>([
     id: 'alert-1',
     name: 'Daily Spend Limit',
     type: 'cost_threshold',
-    condition: 'Daily cost exceeds £500',
+    condition: 'When daily cost exceeds \u00a3500',
     channels: ['email', 'slack'],
     active: true,
     lastTriggered: '2 days ago',
@@ -166,8 +226,8 @@ const alertRules = ref<AlertRule[]>([
     id: 'alert-2',
     name: 'Error Rate Spike',
     type: 'error_rate',
-    condition: 'Error rate exceeds 5% over 15 minutes',
-    channels: ['slack'],
+    condition: 'When error rate exceeds 5% in a 5-minute window',
+    channels: ['slack', 'webhook'],
     active: true,
     lastTriggered: '18 hours ago',
     triggerCount: 7,
@@ -176,21 +236,21 @@ const alertRules = ref<AlertRule[]>([
     id: 'alert-3',
     name: 'Latency Degradation',
     type: 'latency_spike',
-    condition: 'P95 latency exceeds 2000ms over 5 minutes',
+    condition: 'When p95 latency exceeds 2000ms',
     channels: ['email', 'slack'],
-    active: true,
+    active: false,
     lastTriggered: '5 days ago',
     triggerCount: 1,
   },
   {
     id: 'alert-4',
     name: 'Monthly Budget Warning',
-    type: 'cost_threshold',
-    condition: 'Monthly cost reaches 80% of £5,000 budget',
+    type: 'budget_warning',
+    condition: 'When monthly spend reaches 80% of \u00a35,000 budget cap',
     channels: ['email'],
-    active: false,
-    lastTriggered: 'Never',
-    triggerCount: 0,
+    active: true,
+    lastTriggered: '5 days ago',
+    triggerCount: 2,
   },
 ])
 
@@ -198,63 +258,41 @@ const alertHistory = ref<AlertEvent[]>([
   {
     id: 'evt-1',
     ruleName: 'Error Rate Spike',
-    detail: 'Error rate reached 8.2% — OpenAI 429 rate limit errors',
+    detail: 'Error rate reached 8.2% \u2014 OpenAI 429 rate limit errors',
     severity: 'critical',
     time: '18 hours ago',
   },
   {
     id: 'evt-2',
     ruleName: 'Daily Spend Limit',
-    detail: 'Daily spend reached £512.40 — exceeded £500 threshold',
+    detail: 'Daily spend reached \u00a3512.40 \u2014 exceeded \u00a3500 threshold',
     severity: 'warning',
     time: '2 days ago',
   },
   {
     id: 'evt-3',
-    ruleName: 'Error Rate Spike',
-    detail: 'Error rate reached 5.4% — Anthropic 503 service errors',
+    ruleName: 'Monthly Budget Warning',
+    detail: 'Monthly spend at 82% of \u00a35,000 cap (\u00a34,100)',
     severity: 'warning',
-    time: '4 days ago',
-  },
-  {
-    id: 'evt-4',
-    ruleName: 'Latency Degradation',
-    detail: 'P95 latency reached 2,840ms — gpt-4-turbo slowdown',
-    severity: 'critical',
     time: '5 days ago',
-  },
-  {
-    id: 'evt-5',
-    ruleName: 'Daily Spend Limit',
-    detail: 'Daily spend reached £534.10 — exceeded £500 threshold',
-    severity: 'warning',
-    time: '8 days ago',
   },
 ])
 
-function formatType(type: string): string {
-  const map: Record<string, string> = {
-    cost_threshold: 'Cost',
-    error_rate: 'Error Rate',
-    latency_spike: 'Latency',
-  }
-  return map[type] || type
-}
-
 function createAlert() {
-  if (!form.name || !form.threshold) return
+  if (!form.type || !form.name) return
 
   const conditionMap: Record<string, string> = {
-    cost_threshold: `Cost exceeds £${form.threshold} over ${form.window}`,
-    error_rate: `Error rate exceeds ${form.threshold}% over ${form.window}`,
-    latency_spike: `P95 latency exceeds ${form.threshold}ms over ${form.window}`,
+    cost_threshold: `When daily cost exceeds \u00a3${form.threshold || '100'}`,
+    error_rate: `When error rate exceeds ${form.threshold || '5'}% in a 5-minute window`,
+    latency_spike: `When p95 latency exceeds ${form.threshold || '2000'}ms`,
+    budget_warning: `When monthly spend reaches ${form.threshold || '80'}% of budget cap`,
   }
 
   alertRules.value.unshift({
     id: `alert-${Date.now()}`,
     name: form.name,
-    type: form.type as AlertRule['type'],
-    condition: conditionMap[form.type],
+    type: form.type,
+    condition: conditionMap[form.type] || '',
     channels: [...form.channels],
     active: true,
     lastTriggered: 'Never',
@@ -262,11 +300,10 @@ function createAlert() {
   })
 
   showCreate.value = false
+  form.type = ''
   form.name = ''
-  form.type = 'cost_threshold'
   form.threshold = ''
-  form.window = '1h'
-  form.channels = []
+  form.channels = ['email']
 }
 </script>
 
@@ -369,6 +406,11 @@ function createAlert() {
   background: rgba(91, 94, 244, 0.1);
 }
 
+.alerts__type-badge--budget_warning {
+  color: var(--success);
+  background: rgba(0, 217, 126, 0.1);
+}
+
 /* --- Channel badges --- */
 .alerts__channels {
   display: flex;
@@ -376,6 +418,9 @@ function createAlert() {
 }
 
 .alerts__channel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -581,6 +626,35 @@ function createAlert() {
   width: 100%;
 }
 
+.alerts__condition-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-base);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.alerts__condition-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: 180px;
+}
+
+.alerts__condition-input-group input {
+  border-radius: 6px;
+}
+
+.alerts__condition-prefix,
+.alerts__condition-suffix {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
 .alerts__channel-options {
   display: flex;
   gap: 16px;
@@ -593,6 +667,7 @@ function createAlert() {
   font-size: 0.8125rem;
   color: var(--text-secondary);
   cursor: pointer;
+  text-transform: capitalize;
 }
 
 .alerts__checkbox-label input[type="checkbox"] {
