@@ -1,6 +1,10 @@
 [build]
 builder = "nixpacks"
 
+[build.variables]
+NIXPACKS_NO_FROZEN_LOCKFILE = "1"
+NIXPACKS_INSTALL_CMD = "pnpm install --no-frozen-lockfile"
+
 [deploy]
 startCommand = "pnpm run start"
 restartPolicyType = "ON_FAILURE"
