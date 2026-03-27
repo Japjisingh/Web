@@ -145,6 +145,138 @@
       </div>
     </section>
 
+    <!-- Features Bento Grid -->
+    <section class="bento">
+      <h2 class="section-title">Everything you need to control AI costs</h2>
+      <div class="bento__grid">
+        <div class="card bento__card bento__card--large">
+          <span class="bento__card-label">COST ANALYTICS</span>
+          <h3 class="bento__card-title">See exactly where every penny goes</h3>
+          <p class="bento__card-desc">Real-time cost breakdowns by model, endpoint, and team. Never get surprised by your AI bill again.</p>
+          <div class="bento__card-demo">
+            <div class="bento__mini-chart">
+              <div v-for="(h, i) in [60, 45, 72, 38, 55, 42, 68]" :key="i" class="bento__bar" :style="{ height: `${h}%`, animationDelay: `${i * 80}ms` }" />
+            </div>
+          </div>
+        </div>
+        <div class="card bento__card bento__card--medium">
+          <span class="bento__card-label">SEMANTIC CACHING</span>
+          <h3 class="bento__card-title">Stop paying for the same answer twice</h3>
+          <p class="bento__card-desc">AI-powered similarity matching caches semantically equivalent queries. 34% average cache hit rate.</p>
+          <div class="bento__cache-demo">
+            <div class="bento__cache-pill bento__cache-pill--hit">CACHE HIT <span class="mono">£0.00</span></div>
+            <div class="bento__cache-pill bento__cache-pill--miss">MISS <span class="mono">£0.0038</span></div>
+            <div class="bento__cache-pill bento__cache-pill--hit">CACHE HIT <span class="mono">£0.00</span></div>
+          </div>
+        </div>
+        <div class="card bento__card bento__card--medium">
+          <span class="bento__card-label">SMART ROUTING</span>
+          <h3 class="bento__card-title">Right model for every request</h3>
+          <p class="bento__card-desc">Automatically route simple queries to cheaper models. Complex tasks go to GPT-4o. You save 20x.</p>
+          <div class="bento__routing-demo">
+            <div class="bento__route-line">
+              <span class="text-muted">Simple →</span>
+              <ModelBadge model="gpt-4o-mini" />
+              <span class="mono text-success">£0.0002</span>
+            </div>
+            <div class="bento__route-line">
+              <span class="text-muted">Complex →</span>
+              <ModelBadge model="gpt-4o" />
+              <span class="mono">£0.0038</span>
+            </div>
+          </div>
+        </div>
+        <div class="card bento__card bento__card--small">
+          <span class="bento__card-label">PII DETECTION</span>
+          <h3 class="bento__card-title">Auto-redact sensitive data</h3>
+          <div class="bento__pii-demo">
+            <span class="bento__pii-text">Email: <span class="bento__pii-redacted">████████</span></span>
+            <span class="bento__pii-text">SSN: <span class="bento__pii-redacted">███-██-████</span></span>
+          </div>
+        </div>
+        <div class="card bento__card bento__card--small">
+          <span class="bento__card-label">BUDGET ALERTS</span>
+          <h3 class="bento__card-title">Never blow your budget</h3>
+          <div class="bento__alert-demo">
+            <div class="bento__alert-notification">
+              <span class="bento__alert-dot" />
+              <span>Budget 80% reached</span>
+            </div>
+          </div>
+        </div>
+        <div class="card bento__card bento__card--large">
+          <span class="bento__card-label">A/B EXPERIMENTS</span>
+          <h3 class="bento__card-title">Test prompts and models with statistical rigour</h3>
+          <p class="bento__card-desc">Split traffic between variants, measure quality and cost, and automatically apply the winner.</p>
+          <div class="bento__experiment-demo">
+            <div class="bento__variant">
+              <span class="mono" style="font-size: 0.625rem; color: var(--text-muted)">VARIANT A</span>
+              <span class="mono">GPT-4o — £0.0038/req</span>
+            </div>
+            <span class="mono text-muted" style="font-size: 0.625rem">VS</span>
+            <div class="bento__variant bento__variant--winning">
+              <span class="mono" style="font-size: 0.625rem; color: var(--success)">VARIANT B — WINNER</span>
+              <span class="mono">GPT-4o-mini — £0.0002/req</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vertical tabs -->
+    <section class="verticals-section">
+      <h2 class="section-title">Built for your industry</h2>
+      <div class="verticals__tabs">
+        <button
+          v-for="v in verticalTabs"
+          :key="v.id"
+          class="verticals__tab"
+          :class="{ 'verticals__tab--active': activeVertical === v.id }"
+          @click="activeVertical = v.id"
+        >
+          {{ v.label }}
+        </button>
+      </div>
+      <div class="verticals__content card">
+        <div class="verticals__panel" v-for="v in verticalTabs" :key="v.id" v-show="activeVertical === v.id">
+          <div class="verticals__panel-left">
+            <h3 class="verticals__panel-title">{{ v.title }}</h3>
+            <p class="verticals__panel-desc">{{ v.description }}</p>
+            <ul class="verticals__features">
+              <li v-for="f in v.features" :key="f">{{ f }}</li>
+            </ul>
+            <span v-if="v.compliance" class="verticals__compliance-badge mono">{{ v.compliance }}</span>
+          </div>
+          <div class="verticals__panel-right">
+            <blockquote class="verticals__quote">
+              <p>"{{ v.quote.text }}"</p>
+              <footer>
+                <strong>{{ v.quote.name }}</strong>
+                <span class="text-muted">{{ v.quote.role }}</span>
+              </footer>
+            </blockquote>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials">
+      <h2 class="section-title">Loved by engineering teams</h2>
+      <div class="testimonials__grid">
+        <div v-for="t in testimonials" :key="t.name" class="card testimonials__card">
+          <p class="testimonials__text">"{{ t.text }}"</p>
+          <div class="testimonials__author">
+            <div class="testimonials__avatar">{{ t.name[0] }}</div>
+            <div>
+              <strong class="testimonials__name">{{ t.name }}</strong>
+              <span class="testimonials__role">{{ t.role }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Pricing -->
     <section id="pricing" class="pricing">
       <h2 class="section-title">Simple, transparent pricing</h2>
@@ -289,6 +421,69 @@ if (import.meta.client) {
     })
   })
 }
+
+const activeVertical = ref('ecommerce')
+
+const verticalTabs = [
+  {
+    id: 'ecommerce', label: 'Ecommerce',
+    title: 'AI-powered shopping, optimised',
+    description: 'Ecommerce teams use AI for product descriptions, customer support, and recommendations. NeuralGate ensures you\'re not overpaying for repetitive queries.',
+    features: ['Cache FAQ responses automatically', 'Route simple queries to cheaper models', 'Track cost per product category', 'PII detection for customer data'],
+    compliance: null,
+    quote: { text: 'We cut our AI bill by 52% in the first month. The caching alone saved us thousands on repeat customer queries.', name: 'Sarah Chen', role: 'VP Engineering, ShopFlow' },
+  },
+  {
+    id: 'hr', label: 'HR & Recruitment',
+    title: 'Smarter hiring, lower costs',
+    description: 'HR platforms process thousands of CVs and generate personalised outreach. NeuralGate optimises every step.',
+    features: ['Batch CV screening at 10x lower cost', 'Cache common job description templates', 'PII stripping for compliance', 'Model routing for different tasks'],
+    compliance: 'GDPR-ready',
+    quote: { text: 'Processing 50K CVs per month used to cost us a fortune. NeuralGate\'s batch endpoint changed everything.', name: 'Marcus Webb', role: 'CTO, TalentStack' },
+  },
+  {
+    id: 'healthtech', label: 'HealthTech',
+    title: 'Compliant AI for healthcare',
+    description: 'Healthcare AI needs to be cost-effective AND compliant. NeuralGate gives you both with built-in PII detection and data controls.',
+    features: ['Automatic PHI detection and stripping', 'Configurable data retention policies', 'Audit trail for every AI request', 'On-premise deployment option'],
+    compliance: 'HIPAA-ready',
+    quote: { text: 'The PII detection caught sensitive patient data we didn\'t even know was being sent to the API.', name: 'Dr. Priya Patel', role: 'Chief Medical Officer, MedAssist AI' },
+  },
+  {
+    id: 'legaltech', label: 'LegalTech',
+    title: 'AI for legal, with guardrails',
+    description: 'Legal teams need precise, auditable AI. NeuralGate provides full request logging and cost controls for legal AI workflows.',
+    features: ['Full audit log of every AI interaction', 'Prompt compression for long documents', 'Cost tracking per matter/client', 'Data residency controls'],
+    compliance: 'SOC 2 Type II',
+    quote: { text: 'Being able to track AI costs per client matter was a game-changer for our billing.', name: 'James Liu', role: 'Head of Engineering, LexAI' },
+  },
+  {
+    id: 'fintech', label: 'FinTech',
+    title: 'Financial AI, under control',
+    description: 'Financial services demand reliability and cost predictability. NeuralGate provides both with smart routing and budget controls.',
+    features: ['Hard budget caps per API key', 'Real-time cost alerting', 'Model failover for high availability', 'Compliance-ready logging'],
+    compliance: 'PCI DSS compatible',
+    quote: { text: 'The budget alerts saved us from a runaway cost incident that could have been £10K overnight.', name: 'Alex Rivera', role: 'Engineering Lead, PaymentAI' },
+  },
+]
+
+const testimonials = [
+  {
+    name: 'Elena Vasquez',
+    role: 'Head of AI, CloudRetail',
+    text: 'NeuralGate paid for itself in the first 48 hours. We were paying for the same FAQ answers thousands of times without realising it.',
+  },
+  {
+    name: 'David Kim',
+    role: 'CTO, Nexus Health',
+    text: 'The smart routing alone saves us £2K/month. Simple queries go to mini, complex ones to GPT-4o. No code changes needed.',
+  },
+  {
+    name: 'Amara Osei',
+    role: 'VP Engineering, LegalEdge',
+    text: 'Finally, an AI gateway that treats cost optimisation as a first-class feature, not an afterthought. The dashboard is gorgeous too.',
+  },
+]
 
 const demoRows = [
   { id: 1, model: 'gpt-4o', endpoint: '/api/chat', tokens: '512→1024', cost: '£0.0038', isCache: false },
@@ -909,5 +1104,349 @@ function toggleFaq(idx: number) {
   margin: 32px auto 0;
   padding-top: 16px;
   border-top: 1px solid var(--border-base);
+}
+
+/* Bento Grid */
+.bento {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 80px 24px;
+}
+
+.bento__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.bento__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.bento__card--large { grid-column: span 2; }
+.bento__card--medium { grid-column: span 1; }
+.bento__card--small { grid-column: span 1; }
+
+.bento__card-label {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 0.1em;
+}
+
+.bento__card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bento__card-desc {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.bento__mini-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 80px;
+  margin-top: 12px;
+}
+
+.bento__bar {
+  flex: 1;
+  background: var(--primary);
+  border-radius: 3px 3px 0 0;
+  opacity: 0.7;
+  animation: progressFill 600ms ease-out both;
+}
+
+.bento__cache-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bento__cache-pill {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.bento__cache-pill--hit {
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.bento__cache-pill--miss {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.bento__routing-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bento__route-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.bento__pii-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.bento__pii-text {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.bento__pii-redacted {
+  color: var(--danger);
+  background: var(--danger-muted);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.bento__alert-demo {
+  margin-top: 8px;
+}
+
+.bento__alert-notification {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--warning-muted);
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--warning);
+}
+
+.bento__alert-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--warning);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.bento__experiment-demo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bento__variant {
+  flex: 1;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-base);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+}
+
+.bento__variant--winning {
+  border-color: var(--success);
+  background: var(--success-muted);
+}
+
+/* Vertical tabs */
+.verticals-section {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 80px 24px;
+}
+
+.verticals__tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: 8px 8px 0 0;
+  padding: 4px;
+}
+
+.verticals__tab {
+  flex: 1;
+  padding: 8px 16px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.verticals__tab:hover { color: var(--text-primary); }
+.verticals__tab--active { color: var(--text-primary); background: var(--bg-elevated); }
+
+.verticals__content {
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+}
+
+.verticals__panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+.verticals__panel-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.verticals__panel-desc {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.verticals__features {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.verticals__features li {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  padding-left: 16px;
+  position: relative;
+}
+
+.verticals__features li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--success);
+  font-size: 0.6875rem;
+}
+
+.verticals__compliance-badge {
+  display: inline-block;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--success);
+  background: var(--success-muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.verticals__quote {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-base);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.verticals__quote p {
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  font-style: italic;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.verticals__quote footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.verticals__quote strong {
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+}
+
+.verticals__quote .text-muted {
+  font-size: 0.75rem;
+}
+
+/* Testimonials */
+.testimonials {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 80px 24px;
+}
+
+.testimonials__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.testimonials__card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.testimonials__text {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-style: italic;
+}
+
+.testimonials__author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.testimonials__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.testimonials__name {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+}
+
+.testimonials__role {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
 }
 </style>

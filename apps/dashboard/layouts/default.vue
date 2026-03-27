@@ -26,6 +26,10 @@
           <NuxtLink to="/app/requests" class="sidebar__link" active-class="sidebar__link--active">
             <List :size="16" /><span>Requests</span>
           </NuxtLink>
+          <NuxtLink to="/app/live-feed" class="sidebar__link" active-class="sidebar__link--active">
+            <Activity :size="16" /><span>Live Feed</span>
+            <span class="sidebar__badge sidebar__badge--live pulse">live</span>
+          </NuxtLink>
         </div>
 
         <div class="sidebar__group">
@@ -35,7 +39,11 @@
           </NuxtLink>
           <NuxtLink to="/app/optimisation" class="sidebar__link" active-class="sidebar__link--active">
             <Sparkles :size="16" /><span>Savings</span>
-            <span class="sidebar__badge sidebar__badge--success">£890</span>
+            <span class="sidebar__badge sidebar__badge--success">£890 saved</span>
+          </NuxtLink>
+          <NuxtLink to="/app/optimisation" class="sidebar__link" active-class="sidebar__link--active" style="margin-top: -2px">
+            <Lightbulb :size="16" /><span>Recommendations</span>
+            <span class="sidebar__badge sidebar__badge--primary">5</span>
           </NuxtLink>
         </div>
 
@@ -114,7 +122,7 @@
 
 <script setup lang="ts">
 import {
-  LayoutGrid, List, BarChart3, Sparkles, Terminal, Cpu, BookOpen,
+  LayoutGrid, List, Activity, BarChart3, Sparkles, Lightbulb, Terminal, Cpu, BookOpen,
   FlaskConical, Key, Plug, Bell, Settings, Search, ChevronsUpDown,
 } from 'lucide-vue-next'
 
@@ -124,6 +132,7 @@ const commandPalette = useCommandPalette()
 const pageTitles: Record<string, string> = {
   '/app/overview': 'Overview',
   '/app/requests': 'Requests',
+  '/app/live-feed': 'Live Feed',
   '/app/analytics': 'Analytics',
   '/app/optimisation': 'Savings Centre',
   '/app/playground': 'Playground',
@@ -266,6 +275,16 @@ commandPalette.register(
 .sidebar__badge--success {
   color: var(--success);
   background: var(--success-muted);
+}
+
+.sidebar__badge--live {
+  color: var(--success);
+  background: var(--success-muted);
+}
+
+.sidebar__badge--primary {
+  color: var(--primary);
+  background: var(--primary-muted);
 }
 
 .sidebar__bottom {
