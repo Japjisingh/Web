@@ -36,5 +36,9 @@ export default defineNuxtConfig({
     '/app/**': { ssr: false },
   },
 
+  nitro: {
+    preset: 'node-server',
+  },
+
   compatibilityDate: '2025-01-01',
 })

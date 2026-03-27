@@ -6,6 +6,6 @@ NIXPACKS_NO_FROZEN_LOCKFILE = "1"
 NIXPACKS_INSTALL_CMD = "pnpm install --no-frozen-lockfile"
 
 [deploy]
-startCommand = "pnpm run start"
+startCommand = "node apps/dashboard/.output/server/index.mjs"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

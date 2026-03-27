@@ -8,4 +8,4 @@ cmds = ["pnpm install --no-frozen-lockfile"]
 cmds = ["npx turbo run build"]
 
 [start]
-cmd = "pnpm run start"
+cmd = "node apps/dashboard/.output/server/index.mjs"
