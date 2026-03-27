@@ -33,7 +33,7 @@ batch.post('/', async (c) => {
         const result = await proxyRequest(
           apiKey.organisationId,
           apiKey.id,
-          { model: req.model, messages: req.messages, ...req },
+          { ...req, model: req.model, messages: req.messages as Array<{ role: string; content: string }> },
           '/v1/batch',
         )
         totalCost += result.cost
