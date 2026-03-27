@@ -2,6 +2,7 @@
   "name": "neuralgate",
   "private": true,
   "scripts": {
+    "start": "node apps/dashboard/.output/server/index.mjs",
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
