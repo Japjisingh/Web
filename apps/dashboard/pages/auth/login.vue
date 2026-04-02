@@ -36,6 +36,12 @@
         </button>
       </form>
 
+      <div v-if="error" class="auth-error">{{ error }}</div>
+
+      <button class="auth-demo-btn" @click="fillDemo">
+        Use demo account
+      </button>
+
       <p class="auth-footer-text">
         Don't have an account?
         <NuxtLink to="/auth/register" class="auth-link">Create one</NuxtLink>
@@ -47,17 +53,33 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'marketing' })
 
+const DEMO_EMAIL = 'demo@neuralgate.io'
+const DEMO_PASSWORD = 'neuralgate2026'
+
 const email = ref('')
 const password = ref('')
 const isLoading = ref(false)
-const router = useRouter()
+const error = ref('')
+
+function fillDemo() {
+  email.value = DEMO_EMAIL
+  password.value = DEMO_PASSWORD
+}
 
 async function handleLogin() {
+  error.value = ''
   isLoading.value = true
   try {
-    // In production: call better-auth signIn
-    // For demo, navigate directly
-    await navigateTo('/app/overview')
+    // Demo mode: accept demo credentials or any credentials
+    if (email.value === DEMO_EMAIL && password.value === DEMO_PASSWORD) {
+      await navigateTo('/app/overview')
+    } else if (email.value && password.value) {
+      // In production: call better-auth signIn
+      // For demo, allow any valid-looking credentials
+      await navigateTo('/app/overview')
+    } else {
+      error.value = 'Please enter email and password'
+    }
   } finally {
     isLoading.value = false
   }
@@ -146,5 +168,32 @@ async function handleLogin() {
 .auth-link {
   color: var(--primary);
   font-weight: 500;
+}
+
+.auth-error {
+  font-size: 0.8125rem;
+  color: var(--danger);
+  background: var(--danger-muted);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--danger);
+}
+
+.auth-demo-btn {
+  width: 100%;
+  height: 40px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  transition: all var(--transition-fast);
+}
+
+.auth-demo-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-muted);
 }
 </style>
