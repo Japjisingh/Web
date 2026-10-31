@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glidepath Companion</title>
+<meta name="description" content="Training companion for X-Plane 12: live flight data, scored exercises, instructor failures and a debrief.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+:root {
+  --paper: #f1f5f6; --surface: #ffffff; --sunk: #e7eef1; --ink: #12202a; --muted: #546670; --line: #d2dce1;
+  --magenta: #a1246e; --cyan: #0b6f8c; --amber: #8f6200; --green: #1d7550; --red: #b3261e;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0a1419; --surface: #101d24; --sunk: #0d181e; --ink: #e2ebee; --muted: #93a6af; --line: #22353e;
+    --magenta: #e77ec2; --cyan: #4fc2dd; --amber: #e6b347; --green: #62d3a1; --red: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0a1419; --surface: #101d24; --sunk: #0d181e; --ink: #e2ebee; --muted: #93a6af; --line: #22353e;
+  --magenta: #e77ec2; --cyan: #4fc2dd; --amber: #e6b347; --green: #62d3a1; --red: #ff8a80;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.5 var(--f-body); }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+a { color: var(--cyan); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)) 0 max(16px, env(safe-area-inset-right)); }
+.top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; padding-block: 12px; }
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brand b { font: 700 26px/1 var(--f-display); letter-spacing: 0.005em; }
+.brand span { font: 600 12px/1 var(--f-mono); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sw { display: inline-flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 12px 6px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font: 600 14px/1 var(--f-body); cursor: pointer; }
+.sw:hover { background: var(--sunk); }
+.sw .k { position: relative; width: 38px; height: 22px; border-radius: 11px; background: var(--sunk); border: 1px solid var(--line); flex: none; }
+.sw .k::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
+.sw[aria-checked="true"] .k { background: var(--cyan); border-color: var(--cyan); }
+.sw[aria-checked="true"] .k::after { transform: translateX(16px); background: var(--surface); }
+.icon-btn { min-height: 38px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 600 14px/1 var(--f-body); cursor: pointer; }
+.icon-btn:hover { background: var(--sunk); }
+main .wrap { padding-block: 22px 40px; display: grid; gap: 28px; }
+#app { min-width: 0; }
+.setup { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.card h2 { font: 600 21px/1.1 var(--f-display); margin: 0; }
+.card p, .card li { color: var(--muted); }
+.card ol, .card ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.card b { color: var(--ink); }
+code { font: 600 13.5px var(--f-mono); background: var(--sunk); padding: 1px 6px; border-radius: 4px; color: var(--ink); overflow-wrap: anywhere; }
+.warn { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.eyebrow { font: 700 12px/1.2 var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--magenta); margin: 0; }
+footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><b>Glidepath</b><span>Companion for X-Plane 12</span></div>
+    <div class="ctl">
+      <button type="button" class="sw" id="demoSw" role="switch" aria-checked="false"><span class="k" aria-hidden="true"></span>Watch demo flight</button>
+      <button type="button" class="icon-btn" id="themeBtn" aria-label="Switch colour theme">Theme: auto</button>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div id="app"></div>
+
+    <section aria-labelledby="setupH" style="display:grid;gap:14px">
+      <p class="eyebrow">Setup</p>
+      <div class="setup">
+        <div class="card">
+          <h2 id="setupH">Connect X-Plane 12</h2>
+          <ol>
+            <li>Use <b>X-Plane 12.1.1 or later</b> (the version with the built-in web API).</li>
+            <li>In X-Plane open <b>Settings → Network</b> and allow incoming connections to the web API. It listens on port <b>8086</b>.</li>
+            <li>Install <b>Node.js 22</b> or later. In this folder run <code>node bridge.mjs</code>.</li>
+            <li>Open <code>http://localhost:8787</code> in a browser on the same computer.</li>
+            <li>Load a C172 on a runway and pick an exercise. The companion follows your flight automatically.</li>
+          </ol>
+        </div>
+        <div class="card warn">
+          <h2>Using a tablet</h2>
+          <p>Run <code>node bridge.mjs --lan</code> and open the address it prints on a tablet on the same home network. Use this only on a network you trust: neither X-Plane's web API nor this connector has a password, so anyone on the network could read your flight and trigger failures.</p>
+        </div>
+        <div class="card">
+          <h2>Study aid only</h2>
+          <p>Glidepath Companion is not a certified flight training device and its scores do not count towards any licence. Figures are approximate C172S values from public sources. Always follow your aircraft's POH and your instructor.</p>
+        </div>
+      </div>
+    </section>
+    <footer>MSFS 2024 needs a separate Windows helper built on SimConnect; it is not included. Demo mode runs entirely in your browser with no network access.</footer>
+  </div>
+</main>
+<script type="module">
+import { mountCompanion } from './companion.js';
+const root = document.getElementById('app');
+const sw = document.getElementById('demoSw');
+const params = new URLSearchParams(location.search);
+let app = null;
+function mount(demo) {
+  if (app) app.destroy();
+  sw.setAttribute('aria-checked', String(demo));
+  app = mountCompanion(root, { mode: demo ? 'demo' : 'live', eventsUrl: '/events', apiBase: '/api', exercise: params.get('exercise') || undefined });
+  const u = new URL(location.href);
+  if (demo) u.searchParams.set('demo', '1'); else u.searchParams.delete('demo');
+  history.replaceState(null, '', u);
+}
+sw.addEventListener('click', () => mount(sw.getAttribute('aria-checked') !== 'true'));
+mount(params.get('demo') === '1' || location.protocol === 'file:');
+
+const themeBtn = document.getElementById('themeBtn');
+const themes = ['auto', 'light', 'dark'];
+let ti = 0;
+try { ti = Math.max(0, themes.indexOf(localStorage.getItem('gpc-theme') || 'auto')); } catch {}
+function applyTheme() {
+  const t = themes[ti];
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+  themeBtn.textContent = `Theme: ${t}`;
+  try { localStorage.setItem('gpc-theme', t); } catch {}
+}
+themeBtn.addEventListener('click', () => { ti = (ti + 1) % themes.length; applyTheme(); });
+if (params.get('theme') && themes.includes(params.get('theme'))) ti = themes.indexOf(params.get('theme'));
+applyTheme();
+</script>
+</body>
+</html>
