@@ -1,0 +1,70 @@
+// Drives the full flows through host.__jet in the real page (same code path as clicks) and checks the systems.
+const { chromium } = require('playwright'); const fs = require('fs'), path = require('path'), http = require('http');
+const DIST = path.resolve(__dirname, '../../dist-jet');
+const wrapHTML = '<!doctype html><html><head><meta charset="utf-8"></head><body>' + fs.readFileSync(path.join(DIST, 'index.html'), 'utf8') + '</body></html>';
+const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split('?')[0]); if (u === '/_t.html') { r.writeHead(200, { 'content-type': 'text/html' }); return r.end(wrapHTML); } const f = path.join(DIST, u); if (!fs.existsSync(f)) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-type': 'application/javascript' }); fs.createReadStream(f).pipe(r); });
+srv.listen(0, async () => {
+  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const p = await (await b.newContext({ viewport: { width: 1280, height: 900 } })).newPage(); const errs = [];
+  p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.text()); }); p.on('pageerror', e => errs.push('PAGEERR ' + e.message));
+  await p.goto(`http://localhost:${srv.address().port}/_t.html`); await (await p.$('#p-jet')).scrollIntoViewIfNeeded(); await p.waitForTimeout(3000);
+  const res = await p.evaluate(() => {
+    const h = document.querySelector('#p-jet').__jet, s = () => h.sys.st, out = []; let ok = true;
+    const check = (c, m) => { out.push((c ? 'PASS ' : 'FAIL ') + m); if (!c) ok = false; };
+    const A = (id, v) => { h.act(id, v === undefined ? undefined : { to: v }); h.advance(0.3); };
+    const T = a => { h.touch(a); h.advance(0.2); };
+    const until = (c, max = 200) => { let t = 0; while (!c() && t < max) { h.advance(0.5); t += 0.5; } return t; };
+    const f1 = x => Math.round(x * 10) / 10;
+    // ---------------- cold & dark to engines running ----------------
+    h.setMode('practice'); h.setScenario('full');
+    check(!s().elec.dc && s().irs.every(r => r.mode === 'OFF') && s().apu.n === 0 && s().eng.every(e => e.n2 === 0), 'cold & dark: no power, IRS off, APU and engines stopped');
+    A('batV1'); A('bat1', true); A('bat2', true); A('extPwr', true);
+    check(s().elec.src1 === 'EXT PWR' && s().elec.src2 === 'EXT PWR', 'power-up: batteries on, EXT PWR feeds both AC buses');
+    A('irs1', 'NAV'); A('irs2', 'NAV'); A('irs3', 'NAV'); A('crewOxy', true);
+    A('test1'); h.advance(3.5); A('masterWarnL'); A('testApu'); h.advance(3.5); A('test2'); h.advance(3.5);
+    T('HYD'); for (const id of ['pL1', 'pL2', 'pC1', 'pC2', 'pR1', 'pR2']) A(id, true);
+    for (const a of ['ELEC', 'AIR', 'ANTIICE', 'PRESS']) T(a);
+    A('navLogo', 1); A('seatBelts', 1); A('noSmoking', 1); A('emerExit', 1); A('annLt', 2); A('annLt', 1); T('RCOL');
+    A('apuMaster', true); h.advance(13); A('apuStart');
+    const ta = until(() => s().apu.avail);
+    check(s().apu.avail && s().apu.n > 95, `APU running: AVAIL after ${ta} s, N ${f1(s().apu.n)} %, EGT ${Math.round(s().apu.egt)} °C`);
+    A('apuBleed', true); A('extPwr', false); h.advance(4);
+    check(s().elec.src1 === 'APU GEN' && s().bleed.duct[0] > 30, `APU GEN on line, APU bleed ${Math.round(s().bleed.duct[0])} psi`);
+    until(() => s().irs.every(r => r.aligned));
+    check(s().irs.every(r => r.aligned), 'IRS 1, 2, 3 aligned');
+    A('beacon', 1); A('parkBrk'); A('thr1'); A('pack1', false); A('pack2', false); A('apuBleed'); A('engMode', 'IGN'); A('master2', true);
+    until(() => s().eng[1].running); h.advance(8);
+    const e2 = s().eng[1];
+    check(e2.running && e2.n1 > 19 && e2.n1 < 21 && e2.n2 > 58 && e2.n2 < 60 && e2.egt > 400 && e2.egt < 450, `ENG 2 stable at idle: N1 ${f1(e2.n1)} %, N2 ${f1(e2.n2)} %, EGT ${Math.round(e2.egt)} °C, FF ${Math.round(e2.ff)} kg/h`);
+    A('master1', true); until(() => s().eng[0].running); h.advance(8);
+    const e1 = s().eng[0];
+    check(e1.running && e1.n1 > 19 && e1.n1 < 21 && e1.n2 > 58 && e1.n2 < 60 && e1.egt > 400 && e1.egt < 450, `ENG 1 stable at idle: N1 ${f1(e1.n1)} %, N2 ${f1(e1.n2)} %, EGT ${Math.round(e1.egt)} °C`);
+    A('engMode', 'NORM'); A('apuBleed', false); A('pack1', true); A('pack2', true); A('apuMaster', false); h.advance(3);
+    check(s().elec.genOn[0] && s().elec.genOn[1] && s().elec.src1 === 'GEN 1' && s().elec.src2 === 'GEN 2', 'GEN 1 and GEN 2 on line');
+    check(s().hyd.p.every(p => p > 2800), 'HYD 1/2/3: ' + s().hyd.p.map(Math.round).join(' / ') + ' psi');
+    A('sd'); A('flaps', 1); h.advance(1);
+    let r = h.result();
+    check(h.flow.finished && r.score === 100, `full flow scored ${r.score}/100: ${r.inOrder}/${r.total} in order, ${r.late.length} late, ${r.missed.length} missed, ${r.wrong.length} wrong, ${Math.round(r.time)} s`);
+    // ---------------- engine fire during start ----------------
+    h.setScenario('fire');
+    A('beacon', 1); A('parkBrk'); A('thr1'); A('pack1', false); A('pack2', false); A('apuBleed'); A('engMode', 'IGN'); A('master2', true);
+    until(() => s().eng[1].fire);
+    const L = h.sys.lights();
+    check(s().eng[1].fire && s().master.warn && s().master.crc && L.firePb2.t && L.engFire2.t, `ENG 2 FIRE at N2 ${f1(s().eng[1].n2)} %: master warning, chime, fire pb and ENG panel FIRE lights`);
+    A('masterWarnL'); check(!s().master.crc, 'chime silenced');
+    A('thr2'); A('master2', false); A('firePb2'); A('firePb2');
+    check(h.sys.sw.firePb2 && h.sys.lights().agent2_1.t, 'fire pb pushed (guard lifted first), agents armed');
+    h.advance(10.5); A('agent2_1'); h.advance(5);
+    check(!s().eng[1].fire && !s().alerts.some(a => a.lvl === 'W') && !h.sys.lights().firePb2.t, 'fire out after AGENT 1, warning cleared, FIRE light out');
+    A('engMode', 'NORM'); h.confirm(); h.advance(0.5);
+    r = h.result();
+    check(h.flow.finished && r.score === 100, `fire drill scored ${r.score}/100 in ${Math.round(r.time)} s`);
+    // ---------------- order errors ----------------
+    h.setScenario('prep'); A('batV1'); A('bat2', true); A('bat1', true); A('pack1', false); h.flow.finish(); r = h.result();
+    check(r.late.length === 1 && r.wrong.length === 1 && r.missed.length > 0, `debrief flags out-of-order (${r.late.map(x => x.id)}), not-in-flow (${r.wrong.map(w => w.ctl)}) and missed (${r.missed.length})`);
+    return { ok, out };
+  });
+  console.log(res.out.join('\n')); console.log(res.ok ? 'ALL BROWSER LOGIC TESTS PASSED' : 'SOME FAILED');
+  console.log('console errors/warnings:', JSON.stringify(errs));
+  await b.close(); srv.close();
+});

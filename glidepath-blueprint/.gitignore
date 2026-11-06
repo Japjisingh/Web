@@ -1,0 +1,4 @@
+node_modules/
+dist*/
+shots*/
+src/_entry*.js
