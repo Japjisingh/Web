@@ -32,6 +32,14 @@ srv.listen(0, async () => {
   if (want('e')) { await J((h, bs) => { h.setMode('guided'); h.setScenario('fire'); h.setTOD('dusk'); eval('(' + bs + ')')(h); for (let i = 0; i < 160 && !h.sys.st.eng[1].fire; i++) h.advance(0.5); h.advance(1); h.dock(true); h.pose({ pos: [-0.44, 1.2, 0.16], target: [-0.3, 1.02, -0.9], fov: 66 }); }, beforeStart.toString()); await shot('e-engine-fire-warning'); }
   if (want('e2')) { await J(h => { h.dock(false); h.pose({ pos: [0.06, 1.33, 0.56], target: [0.06, 2.0, 0.08], fov: 34 }); }); await shot('e2-fire-pushbutton-lit'); }
   if (want('f')) { await J(h => { if (!h.sys.st.eng[1].fire) return; h.act('master2', { to: false }); h.advance(0.3); h.act('masterWarnL'); h.advance(0.3); h.act('thr2'); h.act('firePb2'); h.act('firePb2'); h.advance(11); h.act('agent2_1'); h.advance(5); h.act('engMode', { to: 'NORM' }); h.confirm(); h.advance(0.5); h.dock(true); h.pose({ pos: [-0.44, 1.2, 0.16], target: [-0.3, 1.1, -0.9], fov: 66 }); }); await shot('f-debrief-overlay'); }
+  // ---- captain-view set (premium pass): same engine-start state at three times of day, callout on the upper display ----
+  const PFX = process.env.PFX || '';
+  const capState = (h, bs, tod) => { h.setMode('guided'); h.setScenario('start'); h.setTOD(tod); eval('(' + bs + ')')(h); h.advance(20); h.dock(false); };
+  const capPose = h => h.pose({ pos: [-0.53, 1.17, 0.14], target: [-0.45, 1.25, -1.0], fov: 70 });
+  for (const tod of ['day', 'dusk', 'night']) if (want('cap-' + tod)) { await J((h, a) => { const [bs, tod, cs, cp] = a; eval('(' + cs + ')')(h, bs, tod); eval('(' + cp + ')')(h); }, [beforeStart.toString(), tod, capState.toString(), capPose.toString()]); await shot(PFX + 'cap-' + tod); }
+  if (want('wide-raw')) { await J((h, a) => { const [bs, cs] = a; eval('(' + cs + ')')(h, bs, 'dusk'); h.hud.root.style.display = 'none'; h.pose({ pos: [-0.12, 1.38, 1.0], target: [-0.08, 1.12, -0.9], fov: 64 }); }, [beforeStart.toString(), capState.toString()]); await shot(PFX + 'wide-raw-dusk'); await J(h => { h.hud.root.style.display = ''; }); }
+  if (want('wide-raw-day')) { await J((h, a) => { const [bs, cs] = a; eval('(' + cs + ')')(h, bs, 'day'); h.hud.root.style.display = 'none'; h.pose({ pos: [-0.12, 1.38, 1.0], target: [-0.08, 1.12, -0.9], fov: 64 }); }, [beforeStart.toString(), capState.toString()]); await shot(PFX + 'wide-raw-day'); await J(h => { h.hud.root.style.display = ''; }); }
+  const perf = await J(h => { const R = h.S.renderer; R.info.autoReset = false; R.info.reset(); h.S.composer.render(); const o = { calls: R.info.render.calls, tris: R.info.render.triangles, q: h.quality.level }; R.info.autoReset = true; return o; }); console.log('perf', JSON.stringify(perf));
   console.log('errors', JSON.stringify(errs.slice(0, 10)));
   await b.close(); srv.close();
 });
