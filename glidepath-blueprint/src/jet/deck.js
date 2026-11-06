@@ -5,7 +5,8 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from '../sim/textures.js';
 import { createPanel, mats, FONT, LCDFONT, smudgeTex } from './panel.js';
-import { CTL } from './controls.js';
+import { CTL, FMS_FK, FMS_AK, FMS_NK, fmsId } from './controls.js';
+import { drawFMS, fmsKeyState, baroText, freqText } from './avionics.js';
 import { drawPFD, drawND, drawEWD, drawSD, drawStby, drawClock, drawBrake } from './displays.js';
 import { fmtT } from './systems.js';
 import { buildShell, buildReflections } from './shell.js';
@@ -157,15 +158,19 @@ export function buildDeck(renderer) {
   {
     const P = createPanel({ name: 'FCU', w: 0.56, h: 0.075, paint: '#46525d', ppm: 3600, maxPx: 2048, atlas: [1024, 512], max: 40 });
     P.module(null, '', 0.002, 0.002, 0.558, 0.073);
-    const win = (u, w, lab, draw) => { P.text(lab, u, 0.0075, 0.0038, { weight: 700 }); P.lcd(null, u, 0.022, w, 0.016, draw); };
+    const win = (u, w, lab, draw) => { P.text(lab, u, 0.0075, 0.0038, { weight: 700 }); P.lcd(null, u, 0.022, w, 0.016, draw, { px: 384 }); };
     const on = sys => sys.st.elec.ac;
-    win(0.07, 0.062, 'SPD          MACH', (x, W, H, sys, key) => { const k = on(sys) ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['- - -', 0.5, 0.56, 0.7, 'center'], ['•', 0.93, 0.5, 0.6, 'center']]); });
-    win(0.20, 0.062, 'HDG    TRK        LAT', (x, W, H, sys, key) => { const k = on(sys) ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['- - -', 0.5, 0.56, 0.7, 'center'], ['•', 0.93, 0.5, 0.6, 'center']]); });
-    win(0.345, 0.072, 'ALT       LVL/CH', (x, W, H, sys, key) => { const k = on(sys) ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['05000', 0.5, 0.56, 0.7, 'center'], ['•', 0.95, 0.5, 0.6, 'center']]); });
-    win(0.48, 0.062, 'V/S    FPA', (x, W, H, sys, key) => { const k = on(sys) ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['-----', 0.5, 0.56, 0.7, 'center']]); });
-    for (const u of [0.07, 0.20, 0.345, 0.48]) P.knob(u, 0.053, 0.0115, { h: 0.012 });
-    const fpb = (u, v, t, w = 0.022) => P.pb('d_fcu', u, v, { top: t, topC: Wh, bot: '', botC: G, paint: true, w, h: 0.015, d: 0.008, bar: true, topSize: 0.4 });
-    fpb(0.022, 0.053, 'SPD/MACH', 0.024); fpb(0.137, 0.058, 'LOC'); fpb(0.27, 0.016, 'HDG-TRK', 0.026); fpb(0.25, 0.039, 'AP 1'); fpb(0.29, 0.039, 'AP 2'); fpb(0.27, 0.06, 'A/THR'); fpb(0.415, 0.058, 'EXPED'); fpb(0.535, 0.058, 'APPR');
+    const F = sys => sys.st.av.fcu;
+    const big = (x, W, H, t, dot, lab) => lcdText(x, W, H, [[t, 0.56, 0.58, 0.68, 'center'], ...(dot ? [['•', 0.94, 0.52, 0.62, 'center']] : []), ...(lab ? [[lab, 0.03, 0.5, 0.34, 'left']] : [])]);
+    win(0.07, 0.062, 'SPD          MACH', (x, W, H, sys, key) => { const f = F(sys), show = !f.spdMan || f.prevSpd > 0, t = f.unit === 'SPD' ? String(f.spd) : '.' + String(Math.round(f.mach * 100)).padStart(2, '0'); const k = on(sys) ? `${f.unit}${show ? t : '---'}${f.spdMan}` : 0; if (key) return k; if (k) big(x, W, H, show ? t : '- - -', f.spdMan, f.unit === 'SPD' ? 'SPD' : 'MACH'); });
+    win(0.20, 0.062, 'HDG    TRK        LAT', (x, W, H, sys, key) => { const f = F(sys), show = !f.hdgMan || f.prevHdg > 0, t = String(f.hdg).padStart(3, '0'); const k = on(sys) ? `${f.trk}${show ? t : '---'}${f.hdgMan}` : 0; if (key) return k; if (k) big(x, W, H, show ? t : '- - -', f.hdgMan, f.trk ? 'TRK' : 'HDG'); });
+    win(0.345, 0.072, 'ALT       LVL/CH', (x, W, H, sys, key) => { const f = F(sys), t = String(f.alt).padStart(5, '0'); const k = on(sys) ? `${t}${f.altMan}` : 0; if (key) return k; if (k) big(x, W, H, t, f.altMan, ''); });
+    win(0.48, 0.062, 'V/S    FPA', (x, W, H, sys, key) => { const f = F(sys), show = f.vsMode || f.prevVs > 0; const t = f.trk ? (f.fpa >= 0 ? '+' : '-') + Math.abs(f.fpa).toFixed(1) : (f.vs >= 0 ? '+' : '-') + String(Math.abs(f.vs / 100)).padStart(2, '0') + 'oo'; const k = on(sys) ? `${f.trk}${show ? t : '-'}` : 0; if (key) return k; if (k) big(x, W, H, show ? t : '-----', false, f.trk ? 'FPA' : 'V/S'); });
+    P.dial('spdKnob', 0.07, 0.053, 0.0115, { h: 0.012 }); P.dial('hdgKnob', 0.20, 0.053, 0.0115, { h: 0.012 });
+    P.dial('altKnob', 0.345, 0.053, 0.0115, { h: 0.012, ring: { id: 'altInc', angles: [-28, 28] } }); P.dial('vsKnob', 0.48, 0.053, 0.0115, { h: 0.012 });
+    P.text('100', 0.3235, 0.0335, 0.0026); P.text('1000', 0.3665, 0.0335, 0.0026);
+    const fpb = (id, u, v, t, w = 0.022) => P.pb(id, u, v, { top: t, topC: Wh, bot: '', botC: G, paint: true, w, h: 0.015, d: 0.008, bar: true, topSize: 0.4 });
+    fpb('spdMach', 0.022, 0.053, 'SPD/MACH', 0.024); fpb('loc', 0.137, 0.058, 'LOC'); fpb('hdgTrk', 0.27, 0.016, 'HDG-TRK', 0.026); fpb('ap1', 0.25, 0.039, 'AP 1'); fpb('ap2', 0.29, 0.039, 'AP 2'); fpb('athr', 0.27, 0.06, 'A/THR'); fpb('exped', 0.415, 0.058, 'EXPED'); fpb('appr', 0.535, 0.058, 'APPR');
     P.text('METRIC ALT', 0.415, 0.038, 0.0032);
     P.group.position.set(0, 0, 0); addPanel(P, gsg);
   }
@@ -175,14 +180,15 @@ export function buildDeck(renderer) {
     P.module(null, '', 0.002, 0.002, w - 0.002, 0.073);
     P.pb('masterWarn' + sfx, m(0.035), 0.022, { top: 'MASTER\nWARN', topC: R, single: true, w: 0.036, h: 0.026, d: 0.012 });
     P.pb('masterCaut' + sfx, m(0.035), 0.055, { top: 'MASTER\nCAUT', topC: A, single: true, w: 0.036, h: 0.026, d: 0.012 });
-    P.lcd(null, m(0.115), 0.018, 0.05, 0.014, (x, W, H, sys, key) => { const k = sys.st.elec.ac ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['QNH 1013', 0.5, 0.55, 0.62, 'center']]); });
-    P.knob(m(0.115), 0.052, 0.0125, { h: 0.012 }); P.text('inHg   hPa', m(0.115), 0.0335, 0.003);
-    P.pb('d_efis' + sfx, m(0.172), 0.022, { top: 'FD', topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.015, d: 0.008, bar: true });
-    P.pb('d_efis' + sfx, m(0.172), 0.052, { top: 'LS', topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.015, d: 0.008, bar: true });
-    ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].forEach((t, i) => P.pb('d_efis' + sfx, m(0.215 + i * 0.034), 0.017, { top: t, topC: Wh, bot: '', botC: G, paint: true, w: 0.022, h: 0.013, d: 0.007, bar: true, topSize: 0.4 }));
-    P.rot('d_ndmode' + sfx, m(0.245), 0.052, { labels: ['LS', 'VOR', 'NAV', 'ARC', 'PLAN'], angles: [-80, -40, 0, 40, 80], r: 0.0085, legendSize: 0.0028, legendR: 1.75 });
-    P.rot('d_ndrange' + sfx, m(0.33), 0.052, { labels: ['10', '20', '40', '80', '160', '320'], angles: [-90, -54, -18, 18, 54, 90], r: 0.0085, legendSize: 0.0028, legendR: 1.75 });
-    P.tog('d_adf1' + sfx, m(0.405), 0.053, { labels: ['VOR', 'OFF', 'ADF'], legendSize: 0.0026, len: 0.016 }); P.tog('d_adf2' + sfx, m(0.455), 0.053, { labels: ['VOR', 'OFF', 'ADF'], legendSize: 0.0026, len: 0.016 });
+    const side = sd < 0 ? 0 : 1;
+    P.lcd(null, m(0.115), 0.018, 0.05, 0.014, (x, W, H, sys, key) => { const b = sys.st.av.baro[side], u = sys.sw['baroUnit' + sfx]; const t = b.std ? 'STD' : (u === 'inHg' ? '' : 'QNH ') + baroText(sys.st.av, side, u); const k = sys.st.elec.ac ? t : 0; if (key) return k; if (k) lcdText(x, W, H, [[t, 0.5, 0.55, 0.62, 'center']]); }, { px: 320 });
+    P.dial('baro' + sfx, m(0.115), 0.052, 0.0105, { h: 0.012, ring: { id: 'baroUnit' + sfx, angles: [-28, 28] } }); P.text('inHg   hPa', m(0.115), 0.0325, 0.003);
+    P.pb('fd' + sfx, m(0.172), 0.022, { top: 'FD', topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.015, d: 0.008, bar: true });
+    P.pb('ls' + sfx, m(0.172), 0.052, { top: 'LS', topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.015, d: 0.008, bar: true });
+    [['CSTR', 'cstr'], ['WPT', 'wpt'], ['VOR.D', 'vord'], ['NDB', 'ndb'], ['ARPT', 'arpt']].forEach(([t, id], i) => P.pb(id + sfx, m(0.215 + i * 0.034), 0.017, { top: t, topC: Wh, bot: '', botC: G, paint: true, w: 0.022, h: 0.013, d: 0.007, bar: true, topSize: 0.4 }));
+    P.rot('ndMode' + sfx, m(0.245), 0.052, { labels: ['LS', 'VOR', 'NAV', 'ARC', 'PLAN'], angles: [-80, -40, 0, 40, 80], r: 0.0085, legendSize: 0.0028, legendR: 1.75 });
+    P.rot('ndRange' + sfx, m(0.33), 0.052, { labels: ['10', '20', '40', '80', '160', '320'], angles: [-90, -54, -18, 18, 54, 90], r: 0.0085, legendSize: 0.0028, legendR: 1.75 });
+    P.tog('adf1' + sfx, m(0.405), 0.053, { labels: ['VOR', 'OFF', 'ADF'], legendSize: 0.0026, len: 0.016 }); P.tog('adf2' + sfx, m(0.455), 0.053, { labels: ['VOR', 'OFF', 'ADF'], legendSize: 0.0026, len: 0.016 });
     P.text('1', m(0.405), 0.033, 0.0034); P.text('2', m(0.455), 0.033, 0.0034);
     P.group.position.set(sd * (0.30 + w / 2), 0, 0);
     addPanel(P, gsg);
@@ -340,14 +346,12 @@ export function buildDeck(renderer) {
     const P = createPanel({ name: 'PED-F', w: 0.42, h: 0.345, paint: '#47535e', ppm: 3200, maxPx: 2048, atlas: [2048, 2048], max: 200 });
     for (const [cu, n] of [[0.105, 1], [0.315, 2]]) {
       P.module(null, '', cu - 0.1, 0.004, cu + 0.1, 0.252);
-      P.lcd(null, cu, 0.064, 0.118, 0.09, (x, W, H, sys, key) => { const k = sys.st.elec.ac ? 1 : 0; if (key) return k; if (!k) return; const L = (t, c, X, Y, s = 0.075, al = 'left') => { x.font = `700 ${H * s}px ${LCDFONT}`; x.fillStyle = c; x.textAlign = al; x.textBaseline = 'middle'; x.fillText(t, X * W, Y * H); };
-        L('INIT', '#f2f6f8', 0.5, 0.07, 0.085, 'center'); L(' CO RTE', '#f2f6f8', 0.02, 0.17, 0.06); L('FROM/TO', '#f2f6f8', 0.98, 0.17, 0.06, 'right'); L('□□□□□□□□□□', '#ffad1f', 0.02, 0.25); L('□□□□/□□□□', '#ffad1f', 0.98, 0.25, 0.075, 'right');
-        L(' FLT NBR', '#f2f6f8', 0.02, 0.41, 0.06); L('□□□□□□□□', '#ffad1f', 0.02, 0.49); L(' COST INDEX', '#f2f6f8', 0.02, 0.65, 0.06); L('---', '#f2f6f8', 0.02, 0.73); L('CRZ FL/TEMP', '#f2f6f8', 0.98, 0.65, 0.06, 'right'); L('-----/---°', '#f2f6f8', 0.98, 0.73, 0.075, 'right'); L('FMS ' + n + ' · GENERIC', '#36d6ff', 0.5, 0.93, 0.055, 'center'); }, { px: 512, gain: 1.4 });
-      for (let i = 0; i < 6; i++) { P.pb('d_lsk', cu - 0.077, 0.027 + i * 0.0145, { top: '—', topC: Wh, single: true, paint: true, w: 0.011, h: 0.008, d: 0.005 }); P.pb('d_lsk', cu + 0.077, 0.027 + i * 0.0145, { top: '—', topC: Wh, single: true, paint: true, w: 0.011, h: 0.008, d: 0.005 }); }
-      const fk = ['DIR', 'PROG', 'PERF', 'INIT', 'DATA', '', 'F-PLN', 'RAD NAV', 'FUEL PRED', 'SEC F-PLN', 'ATC COMM', 'MENU'];
-      fk.forEach((t, i) => { if (!t) return; P.pb('d_fk', cu - 0.075 + (i % 6) * 0.03, 0.124 + Math.floor(i / 6) * 0.017, { top: t, topC: Wh, single: true, paint: true, w: 0.025, h: 0.013, d: 0.006, size: 0.34 }); });
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').concat(['–', '/', 'SP', 'CLR']).forEach((t, i) => P.pb('d_ak', cu + 0.008 + (i % 5) * 0.0175, 0.163 + Math.floor(i / 5) * 0.0145, { top: t, topC: Wh, single: true, paint: true, w: 0.0145, h: 0.0115, d: 0.006, size: 0.5 }));
-      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '+/-'].forEach((t, i) => P.pb('d_nk', cu - 0.072 + (i % 3) * 0.02, 0.168 + Math.floor(i / 3) * 0.0175, { top: t, topC: Wh, single: true, paint: true, w: 0.016, h: 0.013, d: 0.006, size: 0.5 }));
+      P.lcd('fmsScreen' + n, cu, 0.064, 0.118, 0.09, (x, W, H, sys, key) => { if (key) return fmsKeyState(sys, n - 1); drawFMS(x, W, H, sys, n - 1); }, { px: 512, gain: 1.4 });
+      P.areas.push({ id: 'FMSK' + n, title: `Flight computer ${n} keypad`, u0: cu - 0.083, v0: 0.155, u1: cu + 0.086, v1: 0.247 });
+      for (let i = 0; i < 6; i++) { P.pb(fmsId(n, 'L' + (i + 1)), cu - 0.077, 0.027 + i * 0.0145, { top: '—', topC: Wh, single: true, paint: true, w: 0.011, h: 0.008, d: 0.005 }); P.pb(fmsId(n, 'R' + (i + 1)), cu + 0.077, 0.027 + i * 0.0145, { top: '—', topC: Wh, single: true, paint: true, w: 0.011, h: 0.008, d: 0.005 }); }
+      FMS_FK.forEach((t, i) => { if (!t) return; P.pb(fmsId(n, t), cu - 0.075 + (i % 6) * 0.03, 0.124 + Math.floor(i / 6) * 0.017, { top: t, topC: Wh, single: true, paint: true, w: 0.025, h: 0.013, d: 0.006, size: 0.34 }); });
+      FMS_AK.forEach((t, i) => P.pb(fmsId(n, t), cu + 0.008 + (i % 5) * 0.0175, 0.163 + Math.floor(i / 5) * 0.0145, { top: t === '-' ? '–' : t, topC: Wh, single: true, paint: true, w: 0.0145, h: 0.0115, d: 0.006, size: 0.5 }));
+      FMS_NK.forEach((t, i) => P.pb(fmsId(n, t), cu - 0.072 + (i % 3) * 0.02, 0.168 + Math.floor(i / 3) * 0.0175, { top: t, topC: Wh, single: true, paint: true, w: 0.016, h: 0.013, d: 0.006, size: 0.5 }));
       P.knob(cu - 0.082, 0.24, 0.006); P.text('BRT', cu - 0.072, 0.24, 0.003, { align: 'left' });
     }
     P.module('PAGES', 'SYSTEM PAGES', 0.004, 0.256, 0.416, 0.341, { titleAlign: 'center' });
@@ -414,11 +418,14 @@ export function buildDeck(renderer) {
     for (const [u0, n] of [[0.006, 1], [0.324, 2]]) {
       P.module(null, 'RMP ' + n, u0, 0.272, u0 + 0.09, 0.402, { titleSize: 0.0038 });
       const cu = u0 + 0.045;
-      P.lcd(null, cu, 0.298, 0.074, 0.013, (x, W, H, sys, key) => { const k = sys.st.elec.ac ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [[n === 1 ? '121.800' : '131.725', 0.25, 0.55, 0.52, 'center'], [n === 1 ? '118.700' : '123.450', 0.75, 0.55, 0.52, 'center']]); });
+      const rlcd = (u, act) => P.lcd(null, u, 0.298, 0.032, 0.013, (x, W, H, sys, key) => { const w = sys.sw, r = sys.st.av.radio[w['rmpSel' + n]]; const k = sys.st.elec.dc && w['rmpOn' + n] && r ? freqText(act ? r.act : r.sby) : 0; if (key) return k; if (k) lcdText(x, W, H, [[k, 0.5, 0.56, 0.5, 'center']]); }, { px: 192 });
+      rlcd(cu - 0.0215, true); rlcd(cu + 0.0215, false);
+      P.pb(`rmpXfer${n}`, cu, 0.298, { top: '⇆', topC: Wh, single: true, paint: true, w: 0.0085, h: 0.009, d: 0.005, size: 0.62 });
       P.text('ACTIVE    STBY', cu, 0.287, 0.003);
-      ['VHF1', 'VHF2', 'VHF3'].forEach((t, i) => P.pb('d_rmp', u0 + 0.017 + i * 0.028, 0.322, { top: t, topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.012, d: 0.006, bar: true, topSize: 0.42 }));
-      P.pb('d_rmp', u0 + 0.017, 0.345, { top: 'HF1', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 }); P.pb('d_rmp', u0 + 0.045, 0.345, { top: 'AM', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 }); P.pb('d_rmp', u0 + 0.073, 0.345, { top: 'HF2', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 });
-      P.knob(cu, 0.378, 0.011, { h: 0.012 }); P.tog('d_rmpsw' + n, u0 + 0.075, 0.378, { labels: ['OFF', 'ON'], legendSize: 0.0026, len: 0.014, legendSide: 'left' });
+      ['VHF1', 'VHF2', 'VHF3'].forEach((t, i) => P.pb(`rmp${n}${t}`, u0 + 0.017 + i * 0.028, 0.322, { top: t, topC: Wh, bot: '', botC: G, paint: true, w: 0.02, h: 0.012, d: 0.006, bar: true, topSize: 0.42 }));
+      P.pb('d_rmpHF', u0 + 0.017, 0.345, { top: 'HF1', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 }); P.pb('d_rmpAM', u0 + 0.045, 0.345, { top: 'AM', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 }); P.pb('d_rmpHF2', u0 + 0.073, 0.345, { top: 'HF2', topC: Wh, single: true, paint: true, w: 0.02, h: 0.012, d: 0.006, size: 0.42 });
+      P.dial(`rmp${n}Outer`, cu, 0.378, 0.0115, { h: 0.006, step: 20 }); P.dial(`rmp${n}Inner`, cu, 0.378, 0.0072, { h: 0.0125, step: 20, z: 0.001 });
+      P.tog(`rmpOn${n}`, u0 + 0.075, 0.378, { labels: ['OFF', 'ON'], legendSize: 0.0026, len: 0.014, legendSide: 'left' });
     }
     // park brake + audio panels
     P.module('PARK', 'PARK BRK', 0.155, 0.406, 0.265, 0.50, { titleAlign: 'center' });
@@ -437,13 +444,22 @@ export function buildDeck(renderer) {
     }
     // transponder + misc
     P.module('XPDR', 'ATC / TCAS', 0.11, 0.504, 0.31, 0.652, { titleAlign: 'center' });
-    P.lcd(null, 0.165, 0.535, 0.05, 0.016, (x, W, H, sys, key) => { const k = sys.st.elec.ac ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['2000', 0.5, 0.56, 0.75, 'center']]); });
+    P.lcd(null, 0.165, 0.535, 0.05, 0.016, (x, W, H, sys, key) => { const X = sys.st.av.xpdr, w = sys.sw; const code = X.entry ? X.entry.padEnd(4, '-') : X.code; const k = sys.st.elec.dc ? `${code}|${['STBY', 'AUTO', 'ON'][w.xpdr]}|${w.altRptg}|${X.identT > 0}` : 0; if (key) return k; if (!k) return; lcdText(x, W, H, [[code, 0.58, 0.56, 0.72, 'center'], [['SBY', 'AUT', 'ON'][w.xpdr], 0.03, 0.3, 0.3, 'left'], [w.altRptg ? 'ALT' : '', 0.03, 0.72, 0.3, 'left'], [X.identT > 0 ? 'ID' : '', 0.97, 0.3, 0.3, 'right']]); }, { px: 256 });
     P.rot('xpdr', 0.262, 0.543, { labels: ['STBY', 'AUTO', 'ON'], r: 0.0095, legendSize: 0.0032 });
-    for (let i = 0; i < 8; i++) P.pb('d_xk', 0.13 + (i % 4) * 0.022, 0.578 + Math.floor(i / 4) * 0.02, { top: String(i), topC: Wh, single: true, paint: true, w: 0.016, h: 0.014, d: 0.006, size: 0.5 });
-    P.pb('d_ident', 0.25, 0.598, { top: 'IDENT', topC: Wh, single: true, paint: true, w: 0.03, h: 0.016, d: 0.007, size: 0.36 }); P.pb('d_xclr', 0.29, 0.598, { top: 'CLR', topC: Wh, single: true, paint: true, w: 0.02, h: 0.016, d: 0.007, size: 0.4 });
+    for (let i = 0; i < 8; i++) P.pb('x' + i, 0.13 + (i % 4) * 0.022, 0.578 + Math.floor(i / 4) * 0.02, { top: String(i), topC: Wh, single: true, paint: true, w: 0.016, h: 0.014, d: 0.006, size: 0.5 });
+    P.pb('xIdent', 0.25, 0.598, { top: 'IDENT', topC: Wh, single: true, paint: true, w: 0.03, h: 0.016, d: 0.007, size: 0.36 }); P.pb('xClr', 0.29, 0.598, { top: 'CLR', topC: Wh, single: true, paint: true, w: 0.02, h: 0.016, d: 0.007, size: 0.4 });
+    P.tog('altRptg', 0.272, 0.634, { labels: ['OFF', 'ON'], legendSize: 0.0026, len: 0.013 }); P.text('ALT RPTG', 0.236, 0.634, 0.0032, { weight: 700 });
     P.module(null, 'FLOOD LT', 0.006, 0.504, 0.106, 0.652, { titleSize: 0.0036 }); P.knob(0.035, 0.56, 0.008); P.knob(0.075, 0.56, 0.008); P.text('MAIN PNL', 0.035, 0.578, 0.0028); P.text('PED', 0.075, 0.578, 0.0028);
     P.module(null, 'RUD TRIM', 0.314, 0.504, 0.414, 0.652, { titleSize: 0.0036 }); P.lcd(null, 0.364, 0.54, 0.04, 0.014, (x, W, H, sys, key) => { const k = sys.st.elec.ac ? 1 : 0; if (key) return k; if (k) lcdText(x, W, H, [['L 0.0', 0.5, 0.56, 0.55, 'center']]); }); P.knob(0.364, 0.592, 0.011, { h: 0.01 });
     const g = P.group; g.position.set(0, 0.442, -0.10); g.rotation.x = -Math.PI / 2; addPanel(P, ped);
+  }
+
+  /* ---- captain's sidestick: a control of its own (flight control check) ---- */
+  if (SH.stickL) {
+    const K = SH.stickL, stub = { name: 'CONSOLE', group: root, areas: [], w: 1, h: 1, local: () => V(0, 0, 0), areaAt: () => null, areaById: () => null };
+    const hb = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.17, 0.07), new THREE.MeshBasicMaterial({ visible: false })); hb.position.set(0, 0.08, 0); K.piv.add(hb);
+    for (const m of [K.grip, K.btn, hb]) { m.userData.ctl = 'stickL'; hits.push(m); }
+    ctls.stickL = { id: 'stickL', kind: 'stick', panel: stub, obj: K.btn, piv: K.piv, size: 0.07, a: null };
   }
 
   /* ---- merge the shell ---- */
@@ -462,9 +478,9 @@ export function buildDeck(renderer) {
       for (const it of B.items) {
         const id = it.id, c = CTL[id];
         const Lt = Ls[lightKey[id] || id];
-        if (Lt) { const f = (Lt.flash ? flash : 1) * (it.legend.paint ? 0.14 : 1); B.setGlow(it, Lt.t * f, Lt.b * f); } else if (it.glowT || it.glowB) B.setGlow(it, 0, 0);
+        if (Lt) { const f = (Lt.flash ? flash : 1) * (it.legend.paint ? (it.legend.bar ? 0.32 : 0.14) : 1); B.setGlow(it, Lt.t * f, Lt.b * f); } else if (it.glowT || it.glowB) B.setGlow(it, 0, 0);
         let off = 0;
-        if (c && c.k === 'pb' && c.sw) off = sys.sw[c.sw] ? -0.0026 : 0;
+        if (c && c.k === 'pb' && c.sw && !c.free) off = sys.sw[c.sw] ? -0.0026 : 0; // avionics keys are momentary: no latched travel
         else if (c && c.k === 'gpb') off = sys.sw[c.sw] ? 0.004 : 0;
         if (pressT[id] && t - pressT[id] < 0.16) off -= 0.003;
         if (P.ctls[id] && P.ctls[id].kind === 'ann') off = 0;
@@ -473,8 +489,15 @@ export function buildDeck(renderer) {
       B.flush();
     }
     const k = 1 - Math.exp(-dt * 14);
+    const av = sys.st.av;
     for (const C of allCtls) {
-      const c = CTL[C.id]; if (!c || !c.sw) { if (C.guard) { } continue; }
+      const c = CTL[C.id];
+      if (C.kind === 'dial' && c && c.knob) { // working knob: detent rotation, push / pull travel
+        const a = (av.turns[c.knob] || 0) * C.step * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * Math.min(1, k * 1.6); C.obj.rotation.z = -C.a;
+        const kk = av.kick[c.knob], dtk = kk ? sys.t - kk.t : 9; C.obj.position.z = C.z0 + (kk && dtk >= 0 && dtk < 0.3 ? kk.dir * 0.003 * Math.sin(Math.PI * dtk / 0.3) : 0); continue;
+      }
+      if (C.kind === 'stick') { const v = sys.sw.stickL, tx = v === 'AFT' ? 0.3 : v === 'FWD' ? -0.24 : 0, tz = v === 'LEFT' ? 0.32 : v === 'RIGHT' ? -0.32 : 0; C.piv.rotation.x += (tx - C.piv.rotation.x) * k; C.piv.rotation.z += (tz - C.piv.rotation.z) * k; continue; }
+      if (!c || !c.sw) continue;
       const v = sys.sw[c.sw];
       if (C.kind === 'tog') { const i = c.pos.indexOf(v); const a = C.ang[Math.max(0, i)] * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * k; C.piv.rotation.x = -C.a; }
       else if (C.kind === 'rot') { const i = c.pos.indexOf(v); const a = C.ang[Math.max(0, i)] * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * k; C.piv.rotation.z = -C.a; }
@@ -500,7 +523,7 @@ export function buildDeck(renderer) {
       drawDU(DSP.clock, true, x => drawClock(x, 256, sys));
       drawBrake(DSP.brake.x, 256, sys); DSP.brake.t.needsUpdate = true;
     }
-    if (lcdT > 0.25) { lcdT = 0; for (const P of panels) P.updateLCDs(sys); }
+    if (lcdT > 0.1) { lcdT = 0; for (const P of panels) P.updateLCDs(sys); }
   }
   function drawDU(D, on, f) { if (!D) return; if (!on) { if (D.on !== false) { D.x.setTransform(1, 0, 0, 1, 0, 0); D.x.fillStyle = '#000'; D.x.fillRect(0, 0, D.c.width, D.c.height); D.t.needsUpdate = true; D.on = false; } return; } D.on = true; f(D.x); D.t.needsUpdate = true; }
 

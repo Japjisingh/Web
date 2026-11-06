@@ -1,6 +1,6 @@
 // Hero captures at 1920x1200: node hero.js [only,list]   env PR (render pixel ratio, default 2), FRAMES
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path'), http = require('http');
-const B = path.resolve(__dirname, '../..'), DIST = path.join(B, 'dist-jet'), OUT = path.join(B, 'shots-jet-hero'); fs.mkdirSync(OUT, { recursive: true });
+const B = path.resolve(__dirname, '../..'), DIST = path.join(B, 'dist-jet'), OUT = process.env.OUTDIR || path.join(B, 'shots-jet-hero'); fs.mkdirSync(OUT, { recursive: true });
 const only = process.argv[2] ? process.argv[2].split(',') : null, want = n => !only || only.includes(n);
 const PR = +(process.env.PR || 2), FR = +(process.env.FRAMES || 14);
 const wrapHTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:dark}body{margin:0}[hidden]{display:none!important}</style></head><body>' + fs.readFileSync(path.join(DIST, 'index.html'), 'utf8') + '</body></html>';
@@ -39,6 +39,37 @@ srv.listen(0, async () => {
   for (const tod of ['day', 'dusk', 'night']) if (want('cap-' + tod)) { await J((h, a) => { const [bs, tod, cs, cp] = a; eval('(' + cs + ')')(h, bs, tod); eval('(' + cp + ')')(h); }, [beforeStart.toString(), tod, capState.toString(), capPose.toString()]); await shot(PFX + 'cap-' + tod); }
   if (want('wide-raw')) { await J((h, a) => { const [bs, cs] = a; eval('(' + cs + ')')(h, bs, 'dusk'); h.hud.root.style.display = 'none'; h.pose({ pos: [-0.05, 1.58, 1.45], target: [-0.06, 1.0, -0.9], fov: 62 }); }, [beforeStart.toString(), capState.toString()]); await shot(PFX + 'wide-raw-dusk'); await J(h => { h.hud.root.style.display = ''; }); }
   if (want('wide-raw-day')) { await J((h, a) => { const [bs, cs] = a; eval('(' + cs + ')')(h, bs, 'day'); h.hud.root.style.display = 'none'; h.pose({ pos: [-0.05, 1.58, 1.45], target: [-0.06, 1.0, -0.9], fov: 62 }); }, [beforeStart.toString(), capState.toString()]); await shot(PFX + 'wide-raw-day'); await J(h => { h.hud.root.style.display = ''; }); }
+  // ---- working avionics set (FCU, EFIS, ND, flight computers, radios, systems pages, AGENT 2 drill) ----
+  const avState = (h) => {
+    h.setMode('practice'); h.setScenario('start'); h.setTOD('dusk'); h.dock(false); h.hud.root.style.display = '';
+    h.knob('spdKnob', 'set', 160); h.knob('spdKnob', 'pull'); h.knob('hdgKnob', 'set', 279); h.knob('hdgKnob', 'pull');
+    h.knob('altKnob', 'set', 12000); h.knob('vsKnob', 'set', 1500); h.knob('vsKnob', 'pull');
+    h.act('ap1'); h.act('athr'); h.act('loc'); h.act('lsL', { to: true }); h.act('cstrL'); h.act('ndRangeL', { to: 40 }); h.act('adf1L', { to: 'VOR' });
+    h.act('f2_PERF'); h.act('f1_INIT'); h.type(1, 'GPX101');
+    h.act('rmp1Outer', 2); h.act('rmp1Inner', -5); for (const k of ['x4', 'x7', 'x2', 'x1']) h.act(k); h.act('xpdr', { to: 2 });
+    h.sys.setSwitch('intLtOvhd', 2); h.advance(1.5);
+  };
+  const AV = [
+    ['g', 'g-fcu-selected-values', { pos: [-0.10, 1.15, -0.40], target: [0.0, 1.0, -0.775], fov: 44 }],
+    ['h', 'h-efis-pfd-bugs-baro-fd', { pos: [-0.60, 1.07, -0.30], target: [-0.67, 0.92, -0.84], fov: 44 }],
+    ['i', 'i-nd-arc-40-constraints', { pos: [-0.44, 0.96, -0.45], target: [-0.47, 0.85, -0.85], fov: 31 }],
+    ['j', 'j-flight-computers-init-perf', { pos: [0.0, 0.92, -0.30], target: [0.0, 0.47, -0.62], fov: 44 }],
+    ['k', 'k-radio-transponder', { pos: [-0.03, 0.97, 0.33], target: [-0.03, 0.44, 0.01], fov: 54 }]
+  ];
+  for (const [k, name, pose] of AV) if (want(k)) { await J((h, a) => { const [st, pose] = a; if (!h.__av) { eval('(' + st + ')')(h); h.__av = 1; } h.hud.root.style.display = 'none'; h.pose(pose); }, [avState.toString(), pose]); await shot(name); }
+  if (want('l')) { // 2 x 3 grid of the systems pages, drawn at 1024 px each from the live systems state
+    const url = await J(async h => {
+      h.setScenario('start'); h.act('beacon', { to: 1 }); h.act('engMode', { to: 'IGN' }); h.act('master2', { to: true }); for (let i = 0; i < 160 && !h.sys.st.eng[1].running; i++) h.advance(0.5); h.advance(30); h.act('stickL'); h.act('stickL'); h.act('stickL'); h.advance(2);
+      const G = document.createElement('canvas'); G.width = 1920; G.height = 1200; const g = G.getContext('2d'); g.fillStyle = '#0b1117'; g.fillRect(0, 0, 1920, 1200);
+      const pages = ['PRESS', 'COND', 'DOOR', 'WHEEL', 'FCTL', 'STS'], S = 520;
+      for (let i = 0; i < 6; i++) { h.act('sd' + pages[i]); h.advance(0.2); const c = document.createElement('canvas'); c.width = c.height = 1024; h.__drawSD(c.getContext('2d'), 1024, h.sys); const x = 90 + (i % 3) * (S + 90), y = 34 + Math.floor(i / 3) * (S + 66); g.fillStyle = '#1b232b'; g.fillRect(x - 8, y - 8, S + 16, S + 16); g.drawImage(c, x, y, S, S); g.fillStyle = '#9fb2bd'; g.font = '600 18px sans-serif'; g.fillText(pages[i].replace('FCTL', 'F/CTL') + ' page', x, y + S + 26); }
+      return G.toDataURL('image/png');
+    });
+    fs.writeFileSync(path.join(OUT, 'l-systems-pages-grid.png'), Buffer.from(url.split(',')[1], 'base64')); console.log('hero l-systems-pages-grid (2D)');
+  }
+  if (want('m')) { await J(h => { h.setMode('guided'); h.setScenario('fire2'); h.setTOD('dusk'); for (const [id, v] of [['beacon', { to: 1 }], ['parkBrk'], ['thr1'], ['pack1', { to: false }], ['pack2', { to: false }], ['apuBleed'], ['engMode', { to: 'IGN' }], ['master2', { to: true }]]) { h.act(id, v); h.advance(0.3); }
+      for (let i = 0; i < 160 && !h.sys.st.eng[1].fire; i++) h.advance(0.5); h.act('masterWarnL'); h.act('thr2'); h.act('master2', { to: false }); h.act('firePb2'); h.act('firePb2'); h.advance(10.5); h.act('agent2_1'); for (let i = 0; i < 80 && h.flow.current().id !== 'agent2'; i++) h.advance(0.5); h.advance(0.5);
+      h.sys.setSwitch('intLtOvhd', 2); h.hud.root.style.display = ''; h.dock(false); h.pose({ pos: [0.02, 1.30, 0.50], target: [0.06, 1.98, 0.05], fov: 46 }); }); await shot('m-fire-agent2-callout'); }
   const perf = await J(h => { const R = h.S.renderer; R.info.autoReset = false; R.info.reset(); h.S.composer.render(); const o = { calls: R.info.render.calls, tris: R.info.render.triangles, q: h.quality.level }; R.info.autoReset = true; return o; }); console.log('perf', JSON.stringify(perf));
   console.log('errors', JSON.stringify(errs.slice(0, 10)));
   await b.close(); srv.close();

@@ -33,6 +33,9 @@ export function createJetAudio() {
       else if (kind === 'lever') { thump(110, 0.16, 0.55); burst(0.05, 0.3, 900, 'lowpass', 1, 3); }
       else if (kind === 'guard') { burst(0.03, 0.4, 2200, 'bandpass', 1, 3); thump(300, 0.05, 0.2); }
       else if (kind === 'touch') { burst(0.006, 0.15, 6000, 'bandpass', 2, 8); }
+      else if (kind === 'knob') { burst(0.005, 0.45, 6200, 'bandpass', 4, 9); }
+      else if (kind === 'key') { burst(0.008, 0.32, 2800, 'bandpass', 2, 6); }
+      else if (kind === 'stick') { burst(0.04, 0.25, 600, 'lowpass', 1, 2); thump(140, 0.08, 0.2); }
     },
     chime() { ding(CHIME, 1.0, 0.2); },
     event(e) {

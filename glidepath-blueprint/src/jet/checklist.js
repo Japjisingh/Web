@@ -88,7 +88,8 @@ export function createChecklist(host) {
     if (c && !memory) {
       q('.jf-k').textContent = `Step ${flow.cur + 1} of ${flow.steps.length} · ${PHASES[c.ph]}${c.kind === 'wait' ? ' · monitor' : c.kind === 'check' || c.touch ? ' · touch to check' : ''}`;
       q('.jf-t').textContent = c.t;
-      q('.jf-w').textContent = (c.where || '') + (c.tip && mode === 'guided' ? ' — ' + c.tip : '');
+      const tip = c.guide && !c.touch && sys && sys.st ? c.guide(sys).text : c.tip;
+      q('.jf-w').textContent = (c.where || '') + (tip && mode === 'guided' ? ' — ' + tip : '');
       cur.querySelector('[data-a="show"]').hidden = mode !== 'guided' || c.kind === 'confirm';
       cur.querySelector('[data-a="confirm"]').hidden = c.kind !== 'confirm';
       cur.querySelector('[data-a="check"]').hidden = !(c.kind === 'check' || c.touch);
@@ -109,6 +110,7 @@ export function createChecklist(host) {
       ${missed ? `<h5>Missed (${r.missed.length})</h5><ul>${missed}</ul>` : ''}
       ${wrong ? `<h5>Not part of the flow (${r.wrong.length})</h5><ul>${wrong}</ul>` : ''}
       ${!late && !missed && !wrong ? '<p class="good">No steps out of order, none missed.</p>' : ''}
+      ${r.notes && r.notes.length ? `<h5>Timing</h5><ul>${r.notes.map(n => `<li>${n}</li>`).join('')}</ul>` : ''}
       <div class="jf-btns"><button type="button" class="pri" data-a="retry">Try again</button><button type="button" data-a="next">Next mode</button></div>`;
     deb.hidden = false; list.hidden = false; mem.hidden = true; cur.hidden = true;
     render(flow, { t: flow.tEnd });

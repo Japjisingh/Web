@@ -191,7 +191,8 @@ export function createHUD(wrap, api) {
     } else if (c) {
       q('.jh-ph .p').textContent = PHASES[c.ph]; q('.jh-ph .n').textContent = `Step ${flow.cur + 1} / ${flow.steps.length}${c.kind === 'wait' ? ' · monitor' : c.kind === 'check' || c.touch ? ' · touch to check' : ''}`;
       q('.jh-act').textContent = c.t;
-      q('.jh-why').innerHTML = `<b>${c.where || ''}</b>${c.tip && flow.mode === 'guided' ? ' — ' + c.tip : ''}`;
+      const tip = c.guide && !c.touch ? c.guide(sys).text : c.tip;
+      q('.jh-why').innerHTML = `<b>${c.where || ''}</b>${tip && flow.mode === 'guided' ? ' — ' + tip : ''}`;
       show('[data-a="show"]', flow.mode === 'guided' && c.kind !== 'confirm'); show('[data-a="check"]', c.kind === 'check' || !!c.touch); show('[data-a="confirm"]', c.kind === 'confirm'); show('[data-a="finish"]', false);
     }
     const L = flow.last, fb = q('.jh-fb');
@@ -210,6 +211,7 @@ export function createHUD(wrap, api) {
       ${r.missed.length ? `<div><p class="k">Missed</p><ul>${li(r.missed, s => `<li>${s.t} <small>— step ${pos(s)}</small></li>`)}</ul></div>` : ''}
       ${r.wrong.length ? `<div><p class="k">Not part of the flow</p><ul>${li(r.wrong, w => `<li>${names(w.ctl)} <small>— during step ${w.atStep + 1}</small></li>`)}</ul></div>` : ''}
       ${!r.late.length && !r.missed.length && !r.wrong.length ? '<p style="color:#62d3a1;font-weight:600;margin:0">Every step in the right order. Nothing missed.</p>' : ''}
+      ${r.notes && r.notes.length ? `<div><p class="k">Timing</p><ul>${r.notes.map(n => `<li>${n}</li>`).join('')}</ul></div>` : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pri" data-a="retry">Try again</button><button data-a="next">Next mode</button><button data-a="close">View cockpit</button></div>`;
     H.deb.classList.add('show');
   };

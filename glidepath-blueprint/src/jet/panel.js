@@ -53,7 +53,8 @@ export function mats() {
     guardRed: new THREE.MeshPhysicalMaterial({ color: 0xc0201c, roughness: 0.25, transmission: 0, transparent: true, opacity: 0.62, clearcoat: 0.6, depthWrite: false }),
     guardClear: new THREE.MeshPhysicalMaterial({ color: 0xd8dde0, roughness: 0.15, transparent: true, opacity: 0.32, clearcoat: 0.8, depthWrite: false }),
     guardBlack: std({ color: 0x1a1c1f, roughness: 0.4 }),
-    lcdGlass: new THREE.MeshPhysicalMaterial({ color: 0x050607, roughness: 0.12, clearcoat: 1 })
+    lcdGlass: new THREE.MeshPhysicalMaterial({ color: 0x050607, roughness: 0.12, clearcoat: 1 }),
+    dial: std({ color: 0xffffff, vertexColors: true, roughness: 0.48, metalness: 0.08 })
   };
   return _M;
 }
@@ -68,7 +69,7 @@ function faceMaterial(tex) {
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvLUv = uv; vAUv = vec2(mix(aRect.x, aRect.z, uv.x), mix(aRect.y, aRect.w, uv.y)); vGT = aGlowT; vGB = aGlowB; vMode = aMode;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform float uGain; varying vec2 vAUv; varying vec2 vLUv; varying vec3 vGT; varying vec3 vGB; varying vec2 vMode;')
-      .replace('#include <map_fragment>', 'vec4 lg = texture2D(map, vAUv); vec3 gl = vLUv.y > vMode.x ? vGT : vGB;\n diffuseColor.rgb = mix(vec3(0.016) + lg.rgb * 0.055, lg.rgb * 0.85 + 0.015, vMode.y);')
+      .replace('#include <map_fragment>', 'vec4 lg = texture2D(map, vAUv); vec3 gl = vLUv.y > vMode.x ? vGT : vGB;\n float pm = vMode.y > 1.5 ? (vLUv.y > vMode.x ? 1.0 : 0.0) : vMode.y;\n diffuseColor.rgb = mix(vec3(0.016) + lg.rgb * 0.055, lg.rgb * 0.85 + 0.015, pm);')
       .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance += lg.rgb * gl * uGain;');
   };
   return m;
@@ -97,7 +98,7 @@ function createBank(parent, max, atlasW = 2048, atlasH = 1024) {
     const cx = B.shelf.x, cy = B.shelf.y; B.shelf.x += cw + 2; B.shelf.h = Math.max(B.shelf.h, ch);
     drawLegend(ctx, cx, cy, cw, ch, legend);
     aRect.setXYZW(i, cx / atlasW, 1 - (cy + ch) / atlasH, (cx + cw) / atlasW, 1 - cy / atlasH);
-    aMode.setXY(i, legend.single ? -1 : 0.5, legend.paint ? 1 : 0);
+    aMode.setXY(i, legend.single ? -1 : 0.5, legend.paint ? (legend.bar ? 2 : 1) : 0); // 2: printed caption, unprinted light bar
     const it = { i, id, x, y, z0, w, h, d, off: 0, offT: 0, legend, glowT: 0, glowB: 0 };
     B.items.push(it); B.ids[i] = id; place(it); return it;
   };
@@ -290,6 +291,31 @@ export function createPanel(o) {
     P.static(new THREE.BoxGeometry(r * 0.18, r * 0.7, 0.0006), M.white, new THREE.Vector3(p.x, p.y + r * 0.5, (opt.h || 0.009) + 0.0018));
     if (opt.id) { const hb = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.012, 12), new THREE.MeshBasicMaterial({ visible: false })); hb.rotation.x = Math.PI / 2; hb.position.set(p.x, p.y, 0.006); P.group.add(hb); hit(hb, opt.id); reg(opt.id, { kind: 'deco', u, v, size: r * 2 }); }
   };
+  /** working knob: turns (detents), pushes and pulls. One draw call (vertex-coloured: dark body, white index mark).
+   *  opt.ring = { id, angles } adds a concentric selector ring underneath (registered as a rotary control). */
+  P.dial = (id, u, v, r = 0.008, opt = {}) => {
+    const p = P.local(u, v), h = opt.h || 0.009, ni = gg => gg.index ? gg.toNonIndexed() : gg;
+    const g = new THREE.Group(); g.position.set(p.x, p.y, opt.z || 0.0005); P.group.add(g);
+    const n = 24, pts = []; for (let i = 0; i <= n * 2; i++) { const a = i / (n * 2) * Math.PI * 2, rr = r * (i % 2 ? 0.94 : 1); pts.push(new THREE.Vector2(Math.cos(a) * rr, Math.sin(a) * rr)); }
+    const body = ni(new THREE.ExtrudeGeometry(new THREE.Shape(pts), { depth: h, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0008, bevelSegments: 1, curveSegments: 4 }));
+    const mark = ni(new THREE.BoxGeometry(r * 0.18, r * 0.7, 0.0006)); mark.translate(0, r * 0.5, h + 0.0018);
+    for (const gg of [body, mark]) { for (const k of Object.keys(gg.attributes)) if (!['position', 'normal', 'uv'].includes(k)) gg.deleteAttribute(k); if (!gg.attributes.uv) gg.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(gg.attributes.position.count * 2), 2)); }
+    const col = (geo, c) => { const a = new Float32Array(geo.attributes.position.count * 3); for (let i = 0; i < a.length; i += 3) { a[i] = c[0]; a[i + 1] = c[1]; a[i + 2] = c[2]; } geo.setAttribute('color', new THREE.BufferAttribute(a, 3)); return geo; };
+    const tone = opt.light ? [0.26, 0.29, 0.31] : [0.024, 0.028, 0.034];
+    const geo = mergeGeometries([col(body, tone), col(mark, [0.82, 0.84, 0.85])], false);
+    const m = new THREE.Mesh(geo, M.dial); m.castShadow = false; m.receiveShadow = true; g.add(m); hit(m, id);
+    const c = reg(id, { kind: 'dial', obj: g, z0: g.position.z, u, v, size: r * 2.6, a: null, step: opt.step || 15 });
+    if (opt.ring) {
+      const rg = new THREE.Group(); rg.position.set(p.x, p.y, 0.0005); P.group.add(rg);
+      const R = r * 1.5, disc = ni(new THREE.CylinderGeometry(R, R * 1.03, 0.0035, 32)); disc.rotateX(Math.PI / 2); disc.translate(0, 0, 0.00175);
+      const tab = ni(new THREE.BoxGeometry(r * 0.42, r * 0.5, 0.0035)); tab.translate(0, R + r * 0.18, 0.00175);
+      const tmk = ni(new THREE.BoxGeometry(r * 0.12, r * 0.45, 0.0006)); tmk.translate(0, R * 0.92, 0.0039);
+      for (const gg of [disc, tab, tmk]) for (const k of Object.keys(gg.attributes)) if (!['position', 'normal', 'uv'].includes(k)) gg.deleteAttribute(k);
+      const rm = new THREE.Mesh(mergeGeometries([col(disc, [0.05, 0.055, 0.06]), col(tab, [0.05, 0.055, 0.06]), col(tmk, [0.82, 0.84, 0.85])], false), M.dial); rm.castShadow = false; rg.add(rm); hit(rm, opt.ring.id);
+      reg(opt.ring.id, { kind: 'rot', piv: rg, ang: opt.ring.angles, u, v: v - R * 0.9, size: R * 2.2, a: null });
+    }
+    return c;
+  };
   P.screw = (u, v) => { const p = P.local(u, v); P.static(new THREE.CylinderGeometry(0.0022, 0.0022, 0.0012, 10), M.metal, new THREE.Vector3(p.x, p.y, 0.0006), [Math.PI / 2, 0, 0]); };
   /* ---- LCD window: own small canvas texture, emissive ---- */
   P.lcd = (id, u, v, w, h, draw, opt = {}) => {
@@ -298,7 +324,7 @@ export function createPanel(o) {
     const c = document.createElement('canvas'); c.width = cw; c.height = ch; const cx = c.getContext('2d');
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: opt.gain || 1.6, roughness: 0.18, metalness: 0 }));
-    m.position.set(p.x, p.y, opt.z ?? 0.0015); P.group.add(m);
+    m.position.set(p.x, p.y, opt.z ?? 0.0021); P.group.add(m);
     P.static(new RoundedBoxGeometry(w + 0.004, h + 0.004, 0.002, 1, 0.001), M.black, new THREE.Vector3(p.x, p.y, 0.0005));
     const L = { id, c, x: cx, t, w: cw, h: ch, draw, last: '' }; P.lcds.push(L);
     if (id) { hit(m, id); if (!P.ctls[id]) reg(id, { kind: 'ind', u, v, size: Math.max(w, h) }); }

@@ -2,6 +2,8 @@
    Deterministic, fixed timestep, no three.js (runs in Node for tests).
    Every figure is approximate and generic: written from general public knowledge, not any manufacturer's data. */
 
+import { createAvionics, presetAvionics, avUpdate, fcuRule, FIELD_ELEV } from './avionics.js';
+
 export const DT = 1 / 30;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lag = (x, t, tau, dt) => x + (t - x) * (1 - Math.exp(-dt / Math.max(1e-3, tau)));
@@ -33,13 +35,19 @@ export function coldSwitches() {
     annLt: 1, dome: 0, wiperL: 0, wiperR: 0, intLtOvhd: 1,
     manStart1: false, manStart2: false,
     master1: false, master2: false, engMode: 'NORM', thr1: 0, thr2: 0, parkBrk: true, flaps: 0, spdBrk: 0,
-    sdManual: null, xpdr: 1, autoBrk: 0
+    sdManual: null, xpdr: 1, autoBrk: 0,
+    // glareshield autopilot panel (FCU) and EFIS control panels
+    ap1: false, ap2: false, athr: false, loc: false, appr: false, exped: false, altInc: 1000,
+    fdL: true, fdR: true, lsL: false, lsR: false, ovlL: null, ovlR: null, ndModeL: 'ARC', ndModeR: 'ARC', ndRangeL: 10, ndRangeR: 10,
+    baroUnitL: 'hPa', baroUnitR: 'hPa', adf1L: 'OFF', adf2L: 'OFF', adf1R: 'OFF', adf2R: 'OFF',
+    // radio panels, transponder, sidestick (flight control check)
+    rmpOn1: true, rmpOn2: true, rmpSel1: 'VHF1', rmpSel2: 'VHF2', altRptg: true, stickL: 'NEUTRAL'
   };
 }
 
 function engState(i) {
   return { i, n1: 0, n2: 0, egt: OAT + 8, ff: 0, oilP: 0, oilT: OAT + 5, oilQ: 15.5 - i * 0.6, sv: false, ign: '', phase: 'OFF', fuelOn: false, lit: false, running: false,
-    fadec: false, fire: false, fireOutT: -1, fault: '', startT: 0, fuelT: 0, abortT: 0, noAirT: 0, vib1: 0, vib2: 0, egtMax: 0, agents: [{ disch: false }, { disch: false }], pbT: -1 };
+    fadec: false, fire: false, firePersist: false, man: false, crank: false, fireOutT: -1, fault: '', startT: 0, fuelT: 0, abortT: 0, noAirT: 0, vib1: 0, vib2: 0, egtMax: 0, agents: [{ disch: false }, { disch: false }], pbT: -1 };
 }
 
 export function createSystems(opt = {}) {
@@ -58,7 +66,13 @@ export function createSystems(opt = {}) {
       fireTest: { eng1: 0, apu: 0, eng2: 0 }, testsDone: { eng1: false, apu: false, eng2: false }, annTestDone: false,
       alerts: [], memos: [], master: { warn: false, caut: false, crc: false }, ack: new Set(), seen: new Set(),
       sdPage: 'ELEC', sdAuto: 'ELEC', sdLastAuto: '',
-      ignAlt: 0, fireT: -1, firePbT: -1, ackFire: false
+      ignAlt: 0, fireT: -1, firePbT: -1, ackFire: false,
+      av: createAvionics(),
+      press: { cabAlt: FIELD_ELEV, dp: 0, vs: 0, outflow: 1, safety: 0 },
+      cond: { sel: [22, 23, 23], zone: [26.4, 25.2, 25.8], duct: [26.4, 25.2, 25.8], packOut: [OAT + 4, OAT + 4], hotValve: 0 },
+      doors: { fwdL: 1, bridge: true, t: -1 },
+      brakes: { temp: [68, 74, 61, 70] },
+      fctl: { elev: [-12, -12], ail: [-6, -6], spl: [[0, 0, 0, 0], [0, 0, 0, 0]], rud: 0 }
     };
   }
   sys.st = freshState();
@@ -83,6 +97,8 @@ export function createSystems(opt = {}) {
     s.testsDone = { eng1: true, apu: true, eng2: true }; s.annTestDone = true;
     s.fuel.L = 3560; s.fuel.R = 3600; s.fuel.C = 1850;
     s.eng.forEach(e => { e.oilT = OAT + 6; });
+    presetAvionics(s.av);
+    Object.assign(w, { fdL: true, fdR: true, athr: false });
   }
 
   /* ---------------- momentary actions ---------------- */
@@ -112,7 +128,7 @@ export function createSystems(opt = {}) {
     }
     if (id === 'annLt' && v === 2 && s.elec.dc) s.annTestDone = true;
     if (id === 'apuMaster' && !v) s.apu.startReq = false;
-    if (id === 'sdManual') { /* page buttons */ }
+    if (['ap1', 'ap2', 'athr', 'loc', 'appr'].includes(id) && !fcuRule(sys, id, v)) { w[id] = old; emit('reject', { id }); return false; }
     return true;
   };
 
@@ -127,7 +143,7 @@ export function createSystems(opt = {}) {
 
   function update(dt) {
     sys.t += dt;
-    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); alerts(dt); pages();
+    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); cabin(dt); fctl(dt); avUpdate(sys); alerts(dt); pages();
   }
 
   function electrics(dt) {
@@ -277,23 +293,28 @@ export function createSystems(opt = {}) {
       const f = clamp((duct - 14) / 22, 0.25, 1.1);
       const idleN2 = REF.idleN2[i], idleN1 = REF.idleN1[i];
       // phase machine
+      // manual start: MAN START pb with the mode selector at IGN/START (or CRANK: dry motoring) opens the start valve;
+      // the crew sets the MASTER on by hand. Limited automatic protection: the crew monitors and aborts.
+      const manSel = w['manStart' + n] && (w.engMode === 'IGN' || w.engMode === 'CRANK');
       if (e.phase === 'OFF' || e.phase === 'SPOOL') {
-        if (fuelAvail && w.engMode === 'IGN' && E.dc && e.n2 < 25 && !e.fault) { e.phase = 'START'; e.startT = 0; e.fuelT = 0; e.lit = false; e.fuelOn = false; e.noAirT = 0; e.egtMax = e.egt; e.ignCh = (s.ignAlt++ % 2) ? 'B' : 'A'; emit('engStart', { i }); }
+        const auto = fuelAvail && w.engMode === 'IGN' && !w['manStart' + n];
+        if ((manSel || auto) && E.dc && e.n2 < 25 && !e.fault) { e.phase = 'START'; e.man = !auto; e.startT = 0; e.fuelT = 0; e.lit = false; e.fuelOn = false; e.noAirT = 0; e.egtMax = e.egt; e.ignCh = (s.ignAlt++ % 2) ? 'B' : 'A'; emit('engStart', { i, man: e.man }); }
       }
       if (e.phase === 'START') {
-        e.startT += dt;
-        if (!fuelAvail) { e.phase = 'SPOOL'; e.sv = false; e.fuelOn = false; e.ign = ''; e.lit = false; emit('engStop', { i }); }
+        e.startT += dt; e.crank = e.man && w.engMode === 'CRANK';
+        const stop = e.man ? (!manSel && !e.lit) || (e.lit && !fuelAvail) || (!fuelAvail && e.fuelOn) : !fuelAvail;
+        if (stop) { e.phase = 'SPOOL'; e.sv = false; e.fuelOn = false; e.ign = ''; e.lit = false; e.man = false; emit('engStop', { i }); }
         else {
-          e.sv = e.n2 < REF.startValveCut && duct > 18 && E.dc;
-          if (!e.sv && e.n2 < 10) { e.noAirT += dt; if (e.noAirT > 20) { abort(e, 'NO START AIR'); } } else e.noAirT = 0;
-          e.ign = e.n2 >= REF.ignN2 && e.n2 < REF.startValveCut ? e.ignCh : '';
-          if (e.n2 >= REF.fuelN2 && !e.fuelOn) { e.fuelOn = true; e.fuelT = 0; emit('engFuel', { i }); }
-          if (e.fuelOn) { e.fuelT += dt; if (!e.lit && e.fuelT > 2.6 * k && e.ign) { e.lit = true; emit('engLightOff', { i }); } if (!e.lit && e.fuelT > 15) abort(e, 'NO LIGHT-OFF'); }
-          if (e.lit && e.n2 >= idleN2 - 0.8) { e.phase = 'RUN'; e.running = true; e.ign = ''; e.sv = false; emit('engStable', { i }); }
-          if (e.egt > REF.startEGTLimit) abort(e, 'EGT OVER LIMIT');
+          e.sv = (!e.man || manSel) && e.n2 < REF.startValveCut && duct > 18 && E.dc;
+          if (!e.man) { if (!e.sv && e.n2 < 10) { e.noAirT += dt; if (e.noAirT > 20) { abort(e, 'NO START AIR'); } } else e.noAirT = 0; }
+          e.ign = !e.crank && fuelAvail && (e.man || e.n2 >= REF.ignN2) && e.n2 < REF.startValveCut ? e.ignCh : '';
+          if (fuelAvail && !e.crank && e.n2 >= REF.fuelN2 && !e.fuelOn) { e.fuelOn = true; e.fuelT = 0; emit('engFuel', { i }); }
+          if (e.fuelOn) { e.fuelT += dt; if (!e.lit && e.fuelT > 2.6 * k && e.ign) { e.lit = true; emit('engLightOff', { i }); } if (!e.lit && e.fuelT > 15) { if (e.man) e.fault = 'NO LIGHT-OFF'; else abort(e, 'NO LIGHT-OFF'); } }
+          if (e.phase === 'START' && e.lit && e.n2 >= idleN2 - 0.8) { e.phase = 'RUN'; e.running = true; e.ign = ''; e.sv = false; e.fault = ''; emit('engStable', { i }); }
+          if (e.egt > REF.startEGTLimit) { if (e.man) e.fault = 'EGT OVER LIMIT'; else abort(e, 'EGT OVER LIMIT'); }
         }
       } else if (e.phase === 'RUN') {
-        e.sv = false; e.ign = '';
+        e.sv = false; e.ign = ''; e.man = false;
         if (!fuelAvail) { e.phase = 'SPOOL'; e.running = false; e.fuelOn = false; e.lit = false; emit('engStop', { i }); }
       } else if (e.phase === 'ABORT') {
         e.abortT -= dt; e.sv = e.abortT > 0 && duct > 18; e.fuelOn = false; e.lit = false; e.ign = '';
@@ -330,7 +351,7 @@ export function createSystems(opt = {}) {
       e.vib1 = e.n1 > 5 ? 0.3 + i * 0.1 : 0; e.vib2 = e.n2 > 10 ? 0.6 + i * 0.1 : 0;
       // fire injection (training fault)
       const fi = sys.fireInject;
-      if (fi && fi.eng === i && !fi.done && e.phase === 'START' && e.n2 >= fi.n2) { e.fire = true; fi.done = true; s.fireT = sys.t; s.ackFire = false; emit('fire', { i }); }
+      if (fi && fi.eng === i && !fi.done && e.phase === 'START' && e.n2 >= fi.n2) { e.fire = true; e.firePersist = !!fi.persist; fi.done = true; s.fireT = sys.t; s.ackFire = false; emit('fire', { i }); }
     });
     function abort(e, why) { e.phase = 'ABORT'; e.fault = why; e.abortT = 12 * k; e.fuelOn = false; e.lit = false; e.ign = ''; emit('engAbort', { i: e.i, why }); }
   }
@@ -372,9 +393,45 @@ export function createSystems(opt = {}) {
       if (!e.fire) return;
       const fuelCut = !w['master' + (i + 1)] || w['firePb' + (i + 1)];
       // an agent discharged with the fire pb pushed and the fuel cut puts the fire out a few seconds later (generic training model)
-      if (fuelCut && w['firePb' + (i + 1)] && e.agents.some(a => a.disch) && e.fireOutT < 0) e.fireOutT = sys.t + 3;
+      // (training variant: a persistent fire needs the second bottle)
+      const enough = e.firePersist ? e.agents[1].disch : e.agents.some(a => a.disch);
+      if (fuelCut && w['firePb' + (i + 1)] && enough && e.fireOutT < 0) e.fireOutT = sys.t + 3;
       if (e.fireOutT > 0 && sys.t >= e.fireOutT) { e.fire = false; e.fireOutT = -1; emit('fireOut', { i }); }
     });
+  }
+
+  /* cabin: pressure (on the ground the outflow valve stays open), air conditioning, doors and jet bridge, brakes */
+  function cabin(dt) {
+    const w = sys.sw, s = sys.st, B = s.bleed, P = s.press, C = s.cond, Dr = s.doors, k = K();
+    const flow = B.pack[0] + B.pack[1];
+    if (!w.pressMan) P.outflow = lag(P.outflow, s.elec.dc ? 1 : P.outflow, 2, dt);
+    const dp = flow * (Dr.fwdL < 0.05 ? 0.012 : 0.003) * (1.15 - P.outflow * 0.5);
+    P.dp = lag(P.dp, dp, 4, dt);
+    const alt = FIELD_ELEV - P.dp * 2000, vs = (alt - P.cabAlt) / Math.max(dt, 1e-3) * 60;
+    P.vs = lag(P.vs, vs, 2, dt); P.cabAlt = alt;
+    for (const i of [0, 1]) C.packOut[i] = lag(C.packOut[i], B.pack[i] > 0.5 ? 7 + (w.packFlow === 2 ? -2 : 0) : OAT + 4, 25, dt);
+    C.hotValve = towards(C.hotValve, flow > 0.5 && w.hotAir && s.elec.dc ? 1 : 0, 0.4, dt);
+    for (let z = 0; z < 3; z++) {
+      const tgt = flow > 0.5 ? (C.hotValve > 0.5 ? C.sel[z] : 15) : 27 - z * 0.4, tau = flow > 0.5 ? 220 * k : 1800;
+      C.zone[z] = lag(C.zone[z], tgt, tau, dt);
+      C.duct[z] = lag(C.duct[z], flow > 0.5 ? (C.hotValve > 0.5 ? C.sel[z] - 4 + (C.sel[z] - C.zone[z]) * 2 : 10) : C.zone[z], 12, dt);
+    }
+    // the ground crew closes the forward door and pulls the jet bridge back once the beacon is on
+    if (w.beacon && Dr.bridge && Dr.t < 0) Dr.t = sys.t;
+    if (Dr.t >= 0) { Dr.fwdL = clamp(1 - (sys.t - Dr.t - 2) / 3, 0, 1); if (Dr.bridge && sys.t - Dr.t > 9) { Dr.bridge = false; emit('bridgeOff'); } }
+    const bt = s.brakes.temp; for (let j = 0; j < 4; j++) bt[j] = OAT + (bt[j] - OAT) * Math.exp(-dt / 1500);
+  }
+  /* flight controls: surfaces follow the captain's sidestick when hydraulic pressure is there (simplified) */
+  function fctl(dt) {
+    const s = sys.st, H = s.hyd.p, Fc = s.fctl, v = sys.sw.stickL;
+    const ok = i => H[i] > 1450, any = (...ix) => ix.some(ok);
+    const pitch = v === 'AFT' ? 1 : v === 'FWD' ? -1 : 0, roll = v === 'LEFT' ? -1 : v === 'RIGHT' ? 1 : 0;
+    const mv = (cur, tgt, pw) => towards(cur, tgt, pw ? 40 : 6, dt);
+    const el = pitch > 0 ? 30 * pitch : 15 * pitch;
+    Fc.elev[0] = mv(Fc.elev[0], any(0, 1) ? el : -12, any(0, 1)); Fc.elev[1] = mv(Fc.elev[1], any(0, 2) ? el : -12, any(0, 2));
+    Fc.ail[0] = mv(Fc.ail[0], any(0, 1) ? -roll * 25 : -6, any(0, 1)); Fc.ail[1] = mv(Fc.ail[1], any(0, 1) ? roll * 25 : -6, any(0, 1));
+    for (const sd of [0, 1]) for (let j = 0; j < 4; j++) { const sysI = [0, 2, 1, 2][j], up = (sd === 0 ? roll < 0 : roll > 0) ? 35 * Math.abs(roll) : 0; Fc.spl[sd][j] = mv(Fc.spl[sd][j], ok(sysI) ? up : 0, true); }
+    Fc.rud = mv(Fc.rud, 0, any(0, 1, 2));
   }
 
   function alerts(dt) {
@@ -391,10 +448,10 @@ export function createSystems(opt = {}) {
             { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] },
             { t: `FIRE PB ENG ${n} → PUSH`, done: w['firePb' + n] },
             { t: `AGENT 1 → DISCHARGE${wait}`, done: ag1.disch },
-            { t: 'STILL ON FIRE AFTER ~30 s: AGENT 2 → DISCHARGE', done: e.agents[1].disch, cond: true },
+            { t: 'STILL ON FIRE AFTER ~30 s: AGENT 2 → DISCHARGE' + (ag1.disch && !e.agents[1].disch ? (sys.t - ag1.t < 30 ? ` (WAIT ${Math.ceil(30 - (sys.t - ag1.t))} s)` : ' (NOW)') : ''), done: e.agents[1].disch, cond: !ag1.disch || sys.t - ag1.t < 30 },
             { t: 'ATC AND CABIN CREW → INFORM', done: false }] });
         }
-        if (e.fault) A.push({ id: 'sf' + n, lvl: 'C', title: `ENG ${n} START FAULT`, lines: [{ t: e.fault + ' – AUTO START ABORTED' }, { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] }] });
+        if (e.fault) A.push({ id: 'sf' + n, lvl: 'C', title: `ENG ${n} START FAULT`, lines: e.man ? [{ t: e.fault + ' – MANUAL START' }, { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] }, { t: `MAN START ${n} → OFF`, done: !w['manStart' + n] }] : [{ t: e.fault + ' – AUTO START ABORTED' }, { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] }] });
       });
       for (const [k, name] of [['eng1', 'ENG 1'], ['apu', 'APU'], ['eng2', 'ENG 2']]) if (s.fireTest[k] > 0) A.push({ id: 'test' + k, lvl: 'W', title: `${name} FIRE (TEST)`, lines: [] });
       if (s.eng[0].running && !s.fuel.pressL && !(s.fuel.xOpen > 0.5 && s.fuel.pressR)) A.push({ id: 'fpL', lvl: 'C', title: 'FUEL L TANK PUMPS LO PRESS', lines: [{ t: 'L TK PUMPS → ON' }] });
@@ -412,7 +469,8 @@ export function createSystems(opt = {}) {
       if (s.bleed.apuValve > 0.5) M.push({ t: 'APU BLEED ON', c: 'g' });
       if (E.extOn) M.push({ t: 'GROUND POWER IN USE', c: 'g' });
       if (w.engMode === 'IGN') M.push({ t: 'IGNITION SELECTED', c: 'g' });
-      s.eng.forEach((e, i) => { if (e.phase === 'START') M.push({ t: `ENG ${i + 1} START IN PROGRESS`, c: 'g' }); });
+      s.eng.forEach((e, i) => { if (e.phase === 'START') M.push({ t: e.crank ? `ENG ${i + 1} DRY CRANK` : e.man ? `ENG ${i + 1} MANUAL START` : `ENG ${i + 1} START IN PROGRESS`, c: 'g' }); else if (w['manStart' + (i + 1)]) M.push({ t: `ENG ${i + 1} MAN START ON`, c: 'g' }); });
+      if (s.doors.fwdL > 0.05) M.push({ t: 'FWD CABIN DOOR OPEN', c: 'w' });
       if (w.seatBelts) M.push({ t: 'BELTS SIGN ON', c: 'g' });
       if (w.noSmoking) M.push({ t: 'NO SMOKING SIGN ON', c: 'g' });
       if (w.parkBrk) M.push({ t: 'PARKING BRAKE SET', c: 'g' });
@@ -467,6 +525,10 @@ export function createSystems(opt = {}) {
     L.paxOxy = { t: 0, b: lv(w.paxOxy) }; L.maskMan = { t: 0, b: 0 }; L.ratMan = { t: 0, b: 0 };
     L.acEssFeed = { t: 0, b: lv(!w.acEssFeed) }; L.commercial = { t: 0, b: lv(!w.commercial) }; L.idg1 = { t: 0, b: 0 }; L.idg2 = { t: 0, b: 0 };
     L.manStart1 = { t: 0, b: lv(w.manStart1) }; L.manStart2 = { t: 0, b: lv(w.manStart2) };
+    // FCU and EFIS pushbuttons (lit bars), radio selector keys
+    for (const id of ['ap1', 'ap2', 'athr', 'loc', 'appr', 'exped', 'fdL', 'fdR', 'lsL', 'lsR']) L[id] = { t: 0, b: lv(w[id]) };
+    for (const sd of ['L', 'R']) for (const o of ['CSTR', 'WPT', 'VORD', 'NDB', 'ARPT']) L[o.toLowerCase() + sd] = { t: 0, b: lv(w['ovl' + sd] === o) };
+    for (const n of [1, 2]) for (const r of ['VHF1', 'VHF2', 'VHF3']) L[`rmp${n}${r}`] = { t: 0, b: lv(w['rmpOn' + n] && w['rmpSel' + n] === r) };
     // fire panel
     const T = s.fireTest;
     const fl = (i) => { const e = s.eng[i - 1], tst = T['eng' + i] > 0; return lv(e.fire || tst); };

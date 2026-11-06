@@ -140,8 +140,15 @@ export function buildShell(ctx) {
     { const top = new THREE.PlaneGeometry(0.22, 0.9); top.rotateX(-Math.PI / 2); top.translate(cx - sd * 0.008, 0.6635, -0.1); ctx.push(consoleTop, top); }
     // sidestick: rubber boot, ergonomic grip, trigger and push-to-talk button
     S(new THREE.CylinderGeometry(0.028, 0.048, 0.04, 20), M.black, V(cx - sd * 0.012, 0.685, -0.2));
-    { const prof = [[0, 0], [0.016, 0], [0.019, 0.02], [0.017, 0.05], [0.021, 0.08], [0.024, 0.105], [0.02, 0.125], [0.012, 0.135], [0, 0.137]].map(([r2, y]) => new THREE.Vector2(r2, y)); const g = new THREE.LatheGeometry(prof, 16); S(g, M.black, V(cx - sd * 0.012, 0.70, -0.2), [0.12, 0, -sd * 0.1], V(1, 1, 1.25)); }
-    S(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), new THREE.MeshStandardMaterial({ color: 0xa01c1c, roughness: 0.5 }), V(cx - sd * 0.03, 0.835, -0.205), [0, 0, sd * 0.9]);
+    { const prof = [[0, 0], [0.016, 0], [0.019, 0.02], [0.017, 0.05], [0.021, 0.08], [0.024, 0.105], [0.02, 0.125], [0.012, 0.135], [0, 0.137]].map(([r2, y]) => new THREE.Vector2(r2, y)); const g = new THREE.LatheGeometry(prof, 16);
+      if (sd < 0) { // the captain's stick moves (flight control check): its own pivot at the boot
+        const piv = new THREE.Group(); piv.position.set(cx - sd * 0.012, 0.70, -0.2); root.add(piv);
+        const tilt = new THREE.Group(); tilt.rotation.set(0.12, 0, -sd * 0.1, 'YXZ'); piv.add(tilt);
+        const grip = new THREE.Mesh(g, M.black); grip.scale.set(1, 1, 1.25); grip.castShadow = true; tilt.add(grip);
+        const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), new THREE.MeshStandardMaterial({ color: 0xa01c1c, roughness: 0.5 })); btn.position.set(0.011, 0.128, -0.004); btn.rotation.z = -1.0; tilt.add(btn);
+        out.stickL = { piv, grip, btn };
+      } else S(g, M.black, V(cx - sd * 0.012, 0.70, -0.2), [0.12, 0, -sd * 0.1], V(1, 1, 1.25)); }
+    if (sd > 0) S(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), new THREE.MeshStandardMaterial({ color: 0xa01c1c, roughness: 0.5 }), V(cx - sd * 0.03, 0.835, -0.205), [0, 0, sd * 0.9]);
     // tiller: hand wheel on a hub
     { const t = new THREE.TorusGeometry(0.052, 0.009, 10, 32); S(t, M.black, V(cx - sd * 0.03, 0.70, -0.48), [Math.PI / 2 - 0.25, 0, 0]); S(new THREE.CylinderGeometry(0.018, 0.022, 0.03, 16), M.darkMetal, V(cx - sd * 0.03, 0.685, -0.48)); S(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 10), M.black, V(cx - sd * 0.03 + 0.04, 0.72, -0.47)); }
     // oxygen mask stowage box with flip doors and test lever

@@ -121,21 +121,26 @@ export function buildAirport(renderer) {
   }
 
   /* ---------------- jet bridge from the pier to the left forward door ---------------- */
+  const bridgeM = new Map(); let bridge = null;
   {
     const rot = P(-6, 7, 0); const cab = V(-3.7, 0, 3.4);
+    const addB = (geo, mat, pos, r) => { const g = clean(geo); g.applyMatrix4(new THREE.Matrix4().compose(pos.clone().sub(V(rot.x, 0, rot.z)), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(r || [0, 0, 0]), 'YXZ')), V(1, 1, 1))); if (!bridgeM.has(mat)) bridgeM.set(mat, []); bridgeM.get(mat).push(g); };
     add(new THREE.CylinderGeometry(2.4, 2.4, 3.4, 20), whiteM, V(rot.x, Y + 5.2, rot.z)); add(new THREE.CylinderGeometry(0.6, 0.6, 3.6, 12), greyM, V(rot.x, Y + 1.8, rot.z));
     add(new THREE.BoxGeometry(3.2, 3.0, 9), greyM, V(rot.x, Y + 5.2, rot.z).addScaledVector(N, -5), [0, Math.atan2(N.x, N.z), 0]);
     const d = cab.clone().setY(0).sub(V(rot.x, 0, rot.z)); const len = d.length() - 2.2, ang = Math.atan2(d.x, d.z);
     const mid = V(rot.x, 0, rot.z).add(d.clone().setLength(len / 2 + 1.0));
-    add(new THREE.BoxGeometry(2.9, 2.9, len), greyM, V(mid.x, Y + 4.95, mid.z), [0, ang, 0]);
-    add(new THREE.BoxGeometry(3.0, 0.25, len), darkM, V(mid.x, Y + 3.45, mid.z), [0, ang, 0]);
-    for (let i = 0; i < 9; i++) { const p = V(rot.x, 0, rot.z).add(d.clone().setLength(2.4 + i * len / 9)); add(new THREE.BoxGeometry(2.95, 0.1, 0.08), metalM, V(p.x, Y + 6.38, p.z), [0, ang, 0]); }
+    addB(new THREE.BoxGeometry(2.9, 2.9, len), greyM, V(mid.x, Y + 4.95, mid.z), [0, ang, 0]);
+    addB(new THREE.BoxGeometry(3.0, 0.25, len), darkM, V(mid.x, Y + 3.45, mid.z), [0, ang, 0]);
+    for (let i = 0; i < 9; i++) { const p = V(rot.x, 0, rot.z).add(d.clone().setLength(2.4 + i * len / 9)); addB(new THREE.BoxGeometry(2.95, 0.1, 0.08), metalM, V(p.x, Y + 6.38, p.z), [0, ang, 0]); }
     const wp = V(rot.x, 0, rot.z).add(d.clone().setLength(len * 0.72));
-    for (const s of [-0.9, 0.9]) add(new THREE.BoxGeometry(0.5, 3.3, 0.5), greyM, V(wp.x + s * Math.cos(ang), Y + 1.7, wp.z - s * Math.sin(ang)), [0, ang, 0]);
-    add(new RoundedBoxGeometry(3.0, 0.6, 1.2, 2, 0.15), darkM, V(wp.x, Y + 0.45, wp.z), [0, ang, 0]);
-    add(new RoundedBoxGeometry(3.4, 3.1, 3.0, 2, 0.15), whiteM, V(cab.x - 0.6, Y + 4.95, cab.z), [0, ang, 0]);
-    add(new RoundedBoxGeometry(0.6, 3.2, 3.2, 2, 0.2), blackM, V(cab.x + 1.1, Y + 4.95, cab.z), [0, ang * 0.2, 0]);
+    for (const s of [-0.9, 0.9]) addB(new THREE.BoxGeometry(0.5, 3.3, 0.5), greyM, V(wp.x + s * Math.cos(ang), Y + 1.7, wp.z - s * Math.sin(ang)), [0, ang, 0]);
+    addB(new RoundedBoxGeometry(3.0, 0.6, 1.2, 2, 0.15), darkM, V(wp.x, Y + 0.45, wp.z), [0, ang, 0]);
+    addB(new RoundedBoxGeometry(3.4, 3.1, 3.0, 2, 0.15), whiteM, V(cab.x - 0.6, Y + 4.95, cab.z), [0, ang, 0]);
+    addB(new RoundedBoxGeometry(0.6, 3.2, 3.2, 2, 0.2), blackM, V(cab.x + 1.1, Y + 4.95, cab.z), [0, ang * 0.2, 0]);
+    bridge = new THREE.Group(); bridge.position.set(rot.x, 0, rot.z); root.add(bridge);
+    for (const [mat, list] of bridgeM) { const m = new THREE.Mesh(mergeGeometries(list, false), mat); m.receiveShadow = true; bridge.add(m); }
   }
+
   // stand guidance display on a pole ahead of the nose (generic)
   const vd = (() => { const { c, x } = TX.canvas(256, 192); x.fillStyle = '#050505'; x.fillRect(0, 0, 256, 192); x.fillStyle = '#ff3a2a'; x.font = `700 64px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('STOP', 128, 70); x.fillStyle = '#ffd040'; x.font = `700 40px ${FONT}`; x.fillText('STAND 12', 128, 142); return c; })();
   const vdM = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex(vd), emissiveIntensity: 2.0 })); vdM.position.set(-1.2, Y + 6.2, -24.6); root.add(vdM);
@@ -234,5 +239,7 @@ export function buildAirport(renderer) {
     starMat.color.setRGB(1.6 * Math.max(0, k - 0.7) / 0.3, 1.6 * Math.max(0, k - 0.7) / 0.3, 1.7 * Math.max(0, k - 0.7) / 0.3);
   }
   setNight(0);
-  return { root, gpu, setNight, stars, update(sys) { gpu.visible = sys.st.elec.extAvail; } };
+  // the jet bridge swings back once the ground crew has closed the door (systems model: doors.bridge)
+  let bridgeA = 0;
+  return { root, gpu, setNight, stars, update(sys, dt = 0.016) { gpu.visible = sys.st.elec.extAvail; const tgt = sys.st.doors && !sys.st.doors.bridge ? -0.42 : 0; bridgeA += Math.max(-dt * 0.05, Math.min(dt * 0.05, tgt - bridgeA)); if (bridge) bridge.rotation.y = bridgeA; } };
 }

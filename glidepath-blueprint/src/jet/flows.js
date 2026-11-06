@@ -3,7 +3,11 @@
    Step kinds: set (operate a control), check (touch the panel / indicator to confirm), wait (monitor; completes
    by itself), confirm (press Done). A 'set' step that is already satisfied when it comes up becomes a touch-check. */
 
-export const PHASES = { power: 'Power-up', scan: 'Overhead scan', apu: 'APU start', before: 'Before start', start: 'Engine start', after: 'After start', fire: 'Engine fire drill' };
+import { CTL, fmsId } from './controls.js';
+import { fmsStatus, fmsNext } from './avionics.js';
+
+export const PHASES = { power: 'Power-up', scan: 'Overhead scan', apu: 'APU start', fms: 'Flight computer', before: 'Before start', start: 'Engine start', man: 'Manual start', after: 'After start', fire: 'Engine fire drill' };
+const FMS_KEYS = Object.keys(CTL).filter(id => CTL[id].k === 'key');
 
 const all = (...ids) => s => ids.every(id => s.sw[id]);
 const none = (...ids) => s => ids.every(id => !s.sw[id]);
@@ -36,6 +40,9 @@ export const STEPS = {
   apuAvail: { ph: 'apu', kind: 'wait', t: 'APU — wait for AVAIL (watch N and EGT on the SYSTEMS display)', where: 'Lower display · APU page', look: 'sd', done: s => s.st.apu.avail },
   apuBleed: { ph: 'apu', kind: 'set', t: 'APU BLEED — ON', where: 'Overhead · AIR', ctl: ['apuBleed'], done: all('apuBleed') },
   extOff: { ph: 'apu', kind: 'set', t: 'EXT PWR — OFF (APU GEN takes the load)', where: 'Overhead · ELEC', ctl: ['extPwr'], done: s => !s.sw.extPwr, when: s => s.gpu },
+  fms: { ph: 'fms', kind: 'set', t: 'Flight computer — INIT, F-PLN, PERF set', where: 'Pedestal · flight computer 1 (left keypad)', ctl: FMS_KEYS, done: s => fmsStatus(s.st.av.fms).all,
+    guide: s => { const g = fmsNext(s, 0); return { ...(g.key === 'keys' ? { area: 'FMSK1' } : g.key ? { ctl: fmsId(1, g.key) } : {}), text: g.text }; },
+    tip: 'INIT: ZZAA/ZZBB, flight GPX101, baro 1009, cost index 30, FL350. F-PLN: runway 27R, arrival 09. PERF: V1 135, VR 140, V2 145, FLEX 45. Type into the scratchpad, then press the line key next to the field.' },
   irsAligned: { ph: 'apu', kind: 'wait', t: 'IRS — wait until aligned (ALIGN lights out)', where: 'Overhead · IRS', look: 'irs1', done: s => s.st.irs.every(r => r.aligned) },
   // ---------- before start ----------
   beacon: { ph: 'before', kind: 'set', t: 'BEACON — ON', where: 'Overhead · EXT LT', ctl: ['beacon'], done: s => s.sw.beacon >= 1 },
@@ -59,6 +66,13 @@ export const STEPS = {
   apuOff: { ph: 'after', kind: 'set', t: 'APU MASTER SW — OFF (as required)', where: 'Overhead · APU', ctl: ['apuMaster'], done: none('apuMaster') },
   sdCheck: { ph: 'after', kind: 'check', t: 'SYSTEMS display — CHECK: GEN 1 and GEN 2 on line, HYD pressures normal', where: 'Lower display (use the page buttons)', ctl: ['sd'], done: s => s.st.elec.genOn[0] && s.st.elec.genOn[1] },
   flaps: { ph: 'after', kind: 'set', t: 'FLAPS — take-off position (1)', where: 'Pedestal · FLAPS', ctl: ['flaps'], done: s => s.sw.flaps === 1 },
+  // ---------- manual start (engine 2) ----------
+  man2on: { ph: 'man', kind: 'set', t: 'ENG 2 MAN START — ON (start valve opens, N2 rises)', where: 'Overhead · right column · ENG MAN START', ctl: ['manStart2'], done: s => s.sw.manStart2, tip: 'Blue ON. With the mode selector at IGN/START the start valve opens; no fuel or ignition until you set the MASTER.' },
+  man2n2: { ph: 'man', kind: 'wait', t: 'ENG 2 — wait for N2 above about 20 % (maximum motoring is about 25 %)', where: 'Upper display · N2', look: 'ewd', done: s => s.st.eng[1].n2 >= 20 || s.st.eng[1].fuelOn || s.st.eng[1].running },
+  man2master: { ph: 'man', kind: 'set', t: 'ENG 2 MASTER — ON (fuel and ignition)', where: 'Pedestal · ENG', ctl: ['master2'], done: all('master2'), tip: 'From here you protect the engine: no light-off within about 15 s, or EGT running towards the limit, means MASTER OFF.' },
+  man2lit: { ph: 'man', kind: 'wait', t: 'ENG 2 — light-off, EGT and N1 rising (abort if the EGT runs away)', where: 'Upper display', look: 'ewd', done: s => (s.st.eng[1].lit && s.st.eng[1].n1 > 4) || s.st.eng[1].running },
+  man2idle: { ph: 'man', kind: 'wait', t: 'ENG 2 — start valve closed, stable at idle', where: 'Upper display', look: 'ewd', done: s => s.st.eng[1].running },
+  man2off: { ph: 'man', kind: 'set', t: 'ENG 2 MAN START — OFF', where: 'Overhead · right column', ctl: ['manStart2'], done: s => !s.sw.manStart2 },
   // ---------- engine fire during start ----------
   e2mon: { ph: 'start', kind: 'wait', t: 'ENG 2 — monitor: light-off, EGT and N1 rising', where: 'Upper display', look: 'ewd', done: s => s.st.eng[1].fire || s.st.eng[1].running },
   mwSil: { ph: 'fire', kind: 'set', t: 'MASTER WARNING — press to silence; read ENG 2 FIRE', where: 'Glareshield', ctl: ['masterWarnL', 'masterWarnR'], any: true, done: s => s.st.ackFire },
@@ -68,17 +82,26 @@ export const STEPS = {
   wait10: { ph: 'fire', kind: 'wait', t: 'Wait about 10 s while the engine spools down', where: 'Upper display', look: 'ewd', done: s => s.st.firePbT >= 0 && s.t - s.st.firePbT >= 10 },
   agent1: { ph: 'fire', kind: 'set', t: 'AGENT 1 (ENG 2) — DISCH', where: 'Overhead · FIRE', ctl: ['agent2_1'], done: s => s.st.eng[1].agents[0].disch, tip: 'DISCH light comes on when the bottle is empty.' },
   fireOut: { ph: 'fire', kind: 'wait', t: 'FIRE light — check out (if still on after ~30 s: AGENT 2)', where: 'Overhead · FIRE', look: 'firePb2', done: s => !s.st.eng[1].fire },
+  fireStill: { ph: 'fire', kind: 'wait', t: 'FIRE light still on — keep monitoring for about 30 s after AGENT 1', where: 'Overhead · FIRE', look: 'firePb2', done: s => { const a = s.st.eng[1].agents[0]; return !s.st.eng[1].fire || (a.disch && s.t - a.t >= 30); } },
+  agent2: { ph: 'fire', kind: 'set', t: 'AGENT 2 (ENG 2) — DISCH (fire still on after about 30 s)', where: 'Overhead · FIRE', ctl: ['agent2_2'], done: s => s.st.eng[1].agents[1].disch, tip: 'The second bottle. Only after giving the first one about 30 s to work.',
+    note: s => { const [a, b] = s.st.eng[1].agents; if (!a.disch || !b.disch) return ''; const d = Math.round(b.t - a.t); return `AGENT 2 discharged ${d} s after AGENT 1` + (d < 25 ? ' — too early: give the first bottle about 30 s (−15).' : ' — good timing.'); },
+    penalty: s => { const [a, b] = s.st.eng[1].agents; return a.disch && b.disch && b.t - a.t < 25 ? 15 : 0; } },
+  fireOut2: { ph: 'fire', kind: 'wait', t: 'FIRE light — check out after AGENT 2', where: 'Overhead · FIRE', look: 'firePb2', done: s => !s.st.eng[1].fire },
   modeNormF: { ph: 'fire', kind: 'set', t: 'ENG MODE selector — NORM', where: 'Pedestal · ENG', ctl: ['engMode'], done: s => s.sw.engMode === 'NORM' },
   inform: { ph: 'fire', kind: 'confirm', t: 'Tell ATC and the cabin crew; consider an evacuation', where: 'Press Done' }
 };
 
-const PREP = ['batv', 'bat1', 'bat2', 'ext', 'irs', 'crewOxy', 'fireTest', 'hydChk', 'fuelPumps', 'elecChk', 'airChk', 'antiIce', 'press', 'navLt', 'belts', 'noSmk', 'emerExit', 'annTest', 'rightCol', 'apuMaster', 'apuStart', 'apuAvail', 'apuBleed', 'extOff', 'irsAligned'];
+const PREP = ['batv', 'bat1', 'bat2', 'ext', 'irs', 'crewOxy', 'fireTest', 'hydChk', 'fuelPumps', 'elecChk', 'airChk', 'antiIce', 'press', 'navLt', 'belts', 'noSmk', 'emerExit', 'annTest', 'rightCol', 'apuMaster', 'apuStart', 'apuAvail', 'apuBleed', 'extOff', 'fms', 'irsAligned'];
+const BEFORE = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart'];
+const FIRE_A = [...BEFORE, 'm2on', 'e2ign', 'e2mon', 'mwSil', 'thr2Idle', 'm2off', 'fire2pb', 'wait10', 'agent1'];
 const START = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart', 'm2on', 'e2ign', 'e2lit', 'e2idle', 'm1on', 'e1start', 'e1idle', 'modeNorm', 'apuBleedOff', 'packsOn', 'apuOff', 'sdCheck', 'flaps'];
 export const SCENARIOS = {
   prep: { title: 'Cockpit preparation', init: 'cold', steps: PREP },
   start: { title: 'Engine start', init: 'beforeStart', steps: START },
   full: { title: 'Cold & dark to engines running', init: 'cold', steps: [...PREP, ...START] },
-  fire: { title: 'Engine fire during start', init: 'beforeStart', fire: { eng: 1, n2: 36 }, steps: ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart', 'm2on', 'e2ign', 'e2mon', 'mwSil', 'thr2Idle', 'm2off', 'fire2pb', 'wait10', 'agent1', 'fireOut', 'modeNormF', 'inform'] }
+  fire: { title: 'Engine fire during start', init: 'beforeStart', fire: { eng: 1, n2: 36 }, steps: [...FIRE_A, 'fireOut', 'modeNormF', 'inform'] },
+  fire2: { title: 'Engine fire: second bottle', init: 'beforeStart', fire: { eng: 1, n2: 36, persist: true }, steps: [...FIRE_A, 'fireStill', 'agent2', 'fireOut2', 'modeNormF', 'inform'] },
+  manual: { title: 'Manual engine start', init: 'beforeStart', steps: [...BEFORE, 'man2on', 'man2n2', 'man2master', 'man2lit', 'man2idle', 'man2off', 'modeNorm', 'apuBleedOff', 'packsOn'] }
 };
 // controls that never count as wrong (silencing, display pages, lighting)
 export const FREE = new Set(['masterWarn', 'masterCaut', 'masterWarnL', 'masterWarnR', 'masterCautL', 'masterCautR', 'sdENG', 'sdBLEED', 'sdPRESS', 'sdELEC', 'sdHYD', 'sdFUEL', 'sdAPU', 'sdCOND', 'sdDOOR', 'sdWHEEL', 'sdFCTL', 'sdSTS', 'dome', 'intLtOvhd', 'sd', 'ewd', 'pfd', 'nd', 'stby', 'clock', 'brakeGauge', 'batV1', 'batV2']);
@@ -140,7 +163,7 @@ export function createFlow(sys, key, mode = 'guided') {
       q.engaged = true;
       return fb('partial', q, 'Out of order: that control belongs to step ' + (j + 1));
     }
-    if (FREE.has(ctl)) return null;
+    if (FREE.has(ctl) || (CTL[ctl] && CTL[ctl].free)) return null;
     F.errors.push({ ctl, atStep: F.cur, atText: s ? s.t : '', t: sys.t });
     return fb('wrong', s, s ? `Not part of this step. Next: ${s.t}` : 'Not expected now');
   };
@@ -150,8 +173,10 @@ export function createFlow(sys, key, mode = 'guided') {
     const counted = F.steps.filter(s => s.state !== 'na');
     const inOrder = counted.filter(s => s.state === 'done').length, late = counted.filter(s => s.state === 'late').length, missed = counted.filter(s => s.state === 'missed');
     const wrong = F.errors.length;
-    const score = Math.max(0, Math.round(100 * (inOrder + 0.5 * late) / Math.max(1, counted.length)) - Math.min(20, wrong * 2));
-    return { score, total: counted.length, inOrder, late: counted.filter(s => s.state === 'late'), missed, wrong: F.errors, time: (F.tEnd >= 0 ? F.tEnd : sys.t) - F.t0 };
+    const pen = F.steps.reduce((t, s) => t + (s.penalty ? s.penalty(sys) : 0), 0);
+    const score = Math.max(0, Math.round(100 * (inOrder + 0.5 * late) / Math.max(1, counted.length)) - Math.min(20, wrong * 2) - pen);
+    const notes = F.steps.filter(s => s.note).map(s => s.note(sys)).filter(Boolean);
+    return { score, total: counted.length, inOrder, late: counted.filter(s => s.state === 'late'), missed, wrong: F.errors, notes, time: (F.tEnd >= 0 ? F.tEnd : sys.t) - F.t0 };
   };
   F.progress = () => { const c = F.steps.filter(s => s.state === 'done' || s.state === 'late').length; return { done: c, total: F.steps.filter(s => s.state !== 'na').length }; };
   settle();

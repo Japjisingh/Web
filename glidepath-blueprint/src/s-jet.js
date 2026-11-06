@@ -6,8 +6,9 @@ import { createQuality, LEVELS, AUTO_LEVEL } from './sim/quality.js';
 import { xrSupported, createXR } from './sim/xr.js';
 import { createSystems, REF, fmtT } from './jet/systems.js';
 import { createFlow, SCENARIOS } from './jet/flows.js';
-import { CTL, operate, valueText } from './jet/controls.js';
+import { CTL, operate, valueText, fmsId } from './jet/controls.js';
 import { buildDeck, EYE } from './jet/deck.js';
+import { drawSD } from './jet/displays.js';
 import { buildAirport } from './jet/airport.js';
 import { createJetAudio } from './jet/audio.js';
 import { createChecklist } from './jet/checklist.js';
@@ -132,7 +133,7 @@ export default function (host) {
   const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px'; box.appendChild(row);
   const mkBtn = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-sm'; b.style.marginRight = '0'; b.textContent = t; b.addEventListener('click', fn); row.appendChild(b); return b; };
   const resetCold = () => { if (SCENARIOS[scn].init !== 'cold') setScenario('full'); else start(scn); };
-  const skipBefore = () => { if (scn === 'fire') start('fire'); else setScenario('start'); };
+  const skipBefore = () => { if (SCENARIOS[scn].init === 'beforeStart') start(scn); else setScenario('start'); };
   mkBtn('Reset to cold & dark', resetCold); mkBtn('Skip to before start', skipBefore);
   const soundB = mkBtn('Sound on', () => toggleSound());
   const vrB = mkBtn('Enter VR', () => enterVR()); vrB.hidden = true;
@@ -232,7 +233,7 @@ export default function (host) {
     const C = deck.ctls[id], c = CTL[id]; if (!C || !h) return undefined;
     const P = C.panel; const lp = P.group.worldToLocal(h.point.clone());
     if (c.k === 'tog') return lp.y > P.local(C.u, C.v).y ? 1 : -1;
-    if (c.k === 'rot') return lp.x > P.local(C.u, C.v).x ? 1 : -1;
+    if (c.k === 'rot' || (c.k === 'knob' && !c.push)) return lp.x > P.local(C.u, C.v).x ? 1 : -1;
     if (c.k === 'lever' && c.pos.length > 2) { const tl = P.group.worldToLocal(C.obj.localToWorld(V(0, 0, C.tipZ || 0.1))); const fwd = lp.y > tl.y; return id === 'flaps' ? (fwd ? -1 : 1) : (fwd ? 1 : -1); }
     return undefined;
   }
@@ -265,23 +266,33 @@ export default function (host) {
   cvs.style.touchAction = 'none';
   cvs.addEventListener('pointerdown', e => { wrap.focus({ preventScroll: true }); hud.closeMenu(); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); cvs.setPointerCapture(e.pointerId);
     if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), fov: view.fov }; down = null; }
-    else down = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, moved: false, id: e.pointerId }; hud.tip.style.display = 'none'; });
+    else { down = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, moved: false, id: e.pointerId, t0: performance.now(), mod: e.shiftKey || e.altKey || e.button === 2 };
+      const pk = pickScreen(e.clientX, e.clientY); if (pk && pk.id && CTL[pk.id] && CTL[pk.id].k === 'knob') { down.knob = pk; down.steps = 0; } }
+    hud.tip.style.display = 'none'; });
+  cvs.addEventListener('contextmenu', e => e.preventDefault());
   cvs.addEventListener('pointermove', e => {
     if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; view.fov = clamp(pinch.fov * pinch.d / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), 24, 78); tween = null; userLookT = tAbs; return; }
+    if (down && down.id === e.pointerId && down.knob) { // drag on a knob turns it: up or right = clockwise, one detent per 14 px
+      const n = Math.trunc(((e.clientX - down.x) - (e.clientY - down.y)) / 14); if (n !== down.steps) { act(down.knob, n - down.steps); down.steps = n; down.moved = true; } return; }
     if (down && down.id === e.pointerId) { const dx = e.clientX - down.x, dy = e.clientY - down.y; if (Math.abs(dx) + Math.abs(dy) > 6) down.moved = true; if (down.moved) { const k = view.fov / 64 * 0.0055; view.yaw = clamp(down.yaw + dx * k, -2.1, 2.1); view.pitch = clamp(down.pitch + dy * k, -1.25, 1.35); tween = null; userLookT = tAbs; } return; }
     if (e.pointerType !== 'mouse' || performance.now() - hoverT < 60) return; hoverT = performance.now();
     const p = pickScreen(e.clientX, e.clientY); const r = wrap.getBoundingClientRect(); const tip = hud.tip;
     if (p && p.id) { const id = p.id; let t;
       if (id.startsWith('area:')) t = p.area.title ? `${p.area.title} panel` : '';
-      else { const c = CTL[id]; t = c ? `<b>${c.name}</b>${c.sw ? ' · ' + valueText(sys, id) : ''}${c.k === 'tog' ? '<br><small>Click the upper or lower half to move it</small>' : c.k === 'rot' ? '<br><small>Click the left or right side to turn it</small>' : c.k === 'lever' && c.pos.length > 2 ? '<br><small>Click the front or back half to move it</small>' : c.k === 'gpb' ? '<br><small>First click lifts the guard</small>' : ''}` : 'Not modelled in this trainer'; }
+      else { const c = CTL[id]; const vt = c ? valueText(sys, id) : ''; t = c ? `<b>${c.name}</b>${vt ? ' · ' + vt : ''}${c.k === 'tog' ? '<br><small>Click the upper or lower half to move it</small>' : c.k === 'rot' ? '<br><small>Click the left or right side to turn it</small>' : c.k === 'lever' && c.pos.length > 2 ? '<br><small>Click the front or back half to move it</small>' : c.k === 'gpb' ? '<br><small>First click lifts the guard</small>' : c.k === 'knob' ? (c.push ? `<br><small>Drag or scroll to turn · click to push: ${c.pull ? c.push : ''} · Shift+click or long-press to pull: ${c.pull}</small>` : '<br><small>Drag or scroll to turn, or click the left or right side</small>') : c.k === 'stick' ? '<br><small>Click to step through neutral, full aft, full forward, full left, full right</small>' : ''}` : 'Not modelled in this trainer'; }
       if (t) { tip.innerHTML = t; tip.style.display = 'block'; tip.style.transform = `translate(${Math.min(e.clientX - r.left + 14, r.width - 270)}px,${Math.min(e.clientY - r.top + 16, r.height - 60)}px)`; cvs.style.cursor = id.startsWith('area:') ? 'grab' : 'pointer'; } else tip.style.display = 'none';
     } else { tip.style.display = 'none'; cvs.style.cursor = 'grab'; }
   });
-  const up = e => { const d = down; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!d || d.id !== e.pointerId) return; down = null; if (d.moved) return; act(pickScreen(e.clientX, e.clientY)); };
+  const up = e => { const d = down; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!d || d.id !== e.pointerId) return; down = null; if (d.moved) return;
+    if (d.knob && CTL[d.knob.id].push) { act(d.knob, d.mod || e.shiftKey || e.altKey || performance.now() - d.t0 > 450 ? 'pull' : 'push'); return; }
+    act(pickScreen(e.clientX, e.clientY)); };
   cvs.addEventListener('pointerup', up); cvs.addEventListener('pointercancel', e => { pts.delete(e.pointerId); down = null; pinch = null; });
   cvs.addEventListener('pointerleave', () => { hud.tip.style.display = 'none'; });
-  cvs.addEventListener('wheel', e => { if (document.activeElement !== wrap && !e.ctrlKey) return; e.preventDefault(); view.fov = clamp(view.fov * (1 + Math.sign(e.deltaY) * 0.08), 24, 78); tween = null; }, { passive: false });
+  let wheelAcc = 0;
+  cvs.addEventListener('wheel', e => { if (document.activeElement !== wrap && !e.ctrlKey) return; e.preventDefault();
+    if (!e.ctrlKey) { const pk = pickScreen(e.clientX, e.clientY); if (pk && pk.id && CTL[pk.id] && CTL[pk.id].k === 'knob') { wheelAcc -= e.deltaY * (e.deltaMode === 1 ? 40 : 1); const n = Math.trunc(wheelAcc / 100); /* one detent per wheel notch; trackpads accumulate */ if (n) { wheelAcc = 0; act(pk, n * (e.shiftKey ? 10 : 1)); } return; } }
+    view.fov = clamp(view.fov * (1 + Math.sign(e.deltaY) * 0.08), 24, 78); tween = null; }, { passive: false });
   wrap.addEventListener('keydown', e => {
     if (e.target !== wrap) return; const k = e.key, st = 0.06;
     if (k === 'ArrowLeft') view.yaw += st; else if (k === 'ArrowRight') view.yaw -= st; else if (k === 'ArrowUp') view.pitch = Math.min(1.35, view.pitch + st); else if (k === 'ArrowDown') view.pitch = Math.max(-1.25, view.pitch - st);
@@ -298,6 +309,7 @@ export default function (host) {
   function targets() {
     const c = flow && flow.current(); if (!c) return [];
     const res = [];
+    if (c.guide && !c.touch) { const g = c.guide(sys); if (g.ctl) { const w = deck.ctlWorld(g.ctl); if (w) res.push({ ...w, id: g.ctl, w: w.size * 2.2, h: w.size * 2.2 }); } else if (g.area) { const a = deck.areaWorld(g.area); if (a) res.push({ pos: a.pos, nrm: a.nrm, quat: a.quat, w: a.w + 0.006, h: a.h + 0.006, panel: a.panel, area: a.a }); } return res; }
     if (c.ctl) { const ids = c.any ? [c.ctl[0]] : c.kind === 'set' && !c.touch ? c.ctl.filter(id => !ctlDone(c, id)) : c.ctl; for (const id of (ids.length ? ids : c.ctl)) { const w = deck.ctlWorld(id); if (w) res.push({ ...w, id, w: w.size * 1.75, h: w.size * 1.75 }); if (c.ctl.length > 1 && c.kind !== 'set' && res.length) break; } }
     else if (c.area) { const a = deck.areaWorld(c.area); if (a) res.push({ pos: a.pos, nrm: a.nrm, quat: a.quat, w: a.w + 0.01, h: a.h + 0.01, panel: a.panel, area: a.a }); }
     else if (c.look) { const w = deck.ctlWorld(c.look); if (w) res.push({ ...w, id: c.look, w: w.size * 1.25, h: w.size * 1.25 }); }
@@ -306,7 +318,7 @@ export default function (host) {
   let tg = [];
   function showMe(dur = 1.0) { if (!tg.length) tg = targets(); if (tg[0]) { const c = tg.reduce((a, t) => a.add(t.pos), V(0, 0, 0)).multiplyScalar(1 / tg.length); lookAtWorld(c, tg[0].panel, dur); } }
   const tmpV = new THREE.Vector3();
-  const actionText = c => c.kind === 'check' || c.touch ? 'Touch to check' : c.kind === 'wait' ? 'Monitor' : c.kind === 'confirm' ? 'Press Done' : (c.t.split('—')[1] || '').replace(/\(.*\)/, '').trim() || 'Operate';
+  const actionText = c => c.guide && !c.touch ? (c.guide(sys).area ? 'Type the entry' : 'Press') : c.kind === 'check' || c.touch ? 'Touch to check' : c.kind === 'wait' ? 'Monitor' : c.kind === 'confirm' ? 'Press Done' : (c.t.split('—')[1] || '').replace(/\(.*\)/, '').trim() || 'Operate';
   let focusDim = 0;
   function updateGuidance(t, dt) {
     const guided = mode === 'guided' && flow && !flow.finished;
@@ -326,7 +338,7 @@ export default function (host) {
       if (!off && !tween) {
         shown = true;
         finish.uniforms.uFocus.value.set(sx / W, 1 - sy / H, Math.min(0.3, (rad + 26) / H));
-        const C = hud.call; const name = tg[0].area ? `${tg[0].area.title} panel` : (CTL[tg[0].id] && CTL[tg[0].id].name) || ({ ewd: 'ENGINE & WARNING display', sd: 'SYSTEMS display' })[tg[0].id] || 'Control';
+        const C = hud.call; const name = tg[0].area ? (/keypad$/.test(tg[0].area.title) ? tg[0].area.title : `${tg[0].area.title} panel`) : (CTL[tg[0].id] && CTL[tg[0].id].name) || ({ ewd: 'ENGINE & WARNING display', sd: 'SYSTEMS display' })[tg[0].id] || 'Control';
         C.querySelector('.t').textContent = tg.length > 1 && !tg[0].area ? `${name} +${tg.length - 1}` : name; C.querySelector('.a').textContent = actionText(c);
         C.style.display = 'block'; const cw = C.offsetWidth, ch = C.offsetHeight;
         const dir = sx > W * 0.55 ? -1 : 1; let cx = sx + dir * (rad + 60) - (dir < 0 ? cw : 0), cy = sy - rad - 40 - ch / 2;
@@ -365,7 +377,7 @@ export default function (host) {
     sys.events.length = 0;
     if (sys.st.master.warn && !warnWas) { try { if (navigator.vibrate && matchMedia('(pointer: coarse)').matches) navigator.vibrate([90, 60, 90]); } catch (e) { /* none */ } }
     warnWas = sys.st.master.warn;
-    deck.update(sys, dt, tAbs); apt.update(sys); audio.update(sys, dt);
+    deck.update(sys, dt, tAbs); apt.update(sys, dt); audio.update(sys, dt);
     const E = sys.st.elec;
     const integ = E.dc ? todK.integ : 0; deck.setIntegral(integ, integ * [0, 0.55, 1][sys.sw.intLtOvhd]);
     dome.intensity = E.dc ? [0, 0.7, 1.8][sys.sw.dome] + todK.night * 0.5 : 0; floodL.intensity = E.dc ? todK.night * 2.2 : 0;
@@ -405,7 +417,14 @@ export default function (host) {
     setMode, setScenario, setTOD: k => dSeg.set(k), setView(v, instant) { setView(v, instant); },
     lookAt(id, fov = 46) { const w = deck.ctlWorld(id); if (w) { const st = { pos: PRESETS[PANEL_VIEW[w.panel] || 'captain'].pos.clone(), fov }; Object.assign(st, dirYP(w.pos.clone().sub(st.pos))); Object.assign(view, st); tween = null; userLookT = tAbs; } },
     pose(p) { if (p.pos) view.pos = p.pos.clone ? p.pos.clone() : V(...p.pos); if (p.fov) view.fov = p.fov; if (p.yaw != null) view.yaw = p.yaw; if (p.pitch != null) view.pitch = p.pitch; if (p.target) Object.assign(view, dirYP(V(...p.target).sub(view.pos))); tween = null; userLookT = tAbs; touchT = 0; touchMark.material.opacity = 0; },
-    hero, showMe: () => showMe(0.01), dock: o => hud.toggleDock(o), result() { return flow.result(); }, quality, audio
+    hero, showMe: () => showMe(0.01), dock: o => hud.toggleDock(o), result() { return flow.result(); }, quality, audio,
+    /** type a string on flight computer n (1 or 2): letters, digits, / . - and space */
+    type(n, text) { for (const ch of String(text)) act({ id: fmsId(n, ch === ' ' ? 'SP' : ch) }); },
+    /** knob: op 'turn' (n detents), 'push', 'pull' or 'set' (value) */
+    knob(id, op, n) { return act({ id }, op === 'turn' ? n : op === 'set' ? { to: n } : op); },
+    __drawSD: drawSD,
+    /** compact copy of the avionics and switch state for tests */
+    state() { const s = sys.st; return JSON.parse(JSON.stringify({ av: s.av, sdPage: s.sdPage, sw: sys.sw, press: s.press, cond: s.cond, doors: s.doors, brakes: s.brakes, fctl: s.fctl, eng: s.eng.map(e => ({ phase: e.phase, n2: e.n2, sv: e.sv, fuelOn: e.fuelOn, lit: e.lit, running: e.running, man: e.man, fire: e.fire, fault: e.fault })) })); }
   };
   start(scn); setView('captain', true); setTOD('day');
   quality.set(AUTO_LEVEL);
