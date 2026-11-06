@@ -90,7 +90,8 @@ const CSS = `
 .jh-deb ul small{color:#93a9b3}
 .jh-hint{position:absolute;left:12px;bottom:14px;padding:6px 10px;border-radius:999px;font-size:11.5px;color:#b9c9cf;pointer-events:none!important}
 .jhud.hero .jh-hint,.jhud.hero .jh-menu{display:none!important}
-@container jhud (max-width: 1000px){ .jh-hint{display:none} .jh-views{left:12px;top:58px;transform:none} .jh-alert{top:104px} .jh-ring{width:48px;height:48px} .jh-why{font-size:12.5px} .jh-step{padding:9px 12px 9px 10px} }
+@container jhud (min-width: 1001px){ .jh-step{left:14px;transform:none;width:min(470px,34cqw);margin-left:0!important} .jh-hint{left:auto;right:14px} }
+@container jhud (max-width: 1000px){ .jh-step{left:12px;transform:none;width:min(390px,54cqw);margin-left:0!important} .jh-step .jh-why{display:none} .jh-hint{display:none} .jh-views{left:12px;top:58px;transform:none} .jh-alert{top:104px} .jh-ring{width:48px;height:48px} .jh-why{font-size:12.5px} .jh-step{padding:9px 12px 9px 10px} }
 @container jhud (max-width: 760px){
   .jh-dock{width:min(300px,62cqw);top:58px;bottom:auto;max-height:calc(100cqh - 70px)}
   .jh-step{--dockw:0px!important}

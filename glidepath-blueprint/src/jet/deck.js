@@ -8,6 +8,7 @@ import { createPanel, mats, FONT, LCDFONT, smudgeTex } from './panel.js';
 import { CTL } from './controls.js';
 import { drawPFD, drawND, drawEWD, drawSD, drawStby, drawClock, drawBrake } from './displays.js';
 import { fmtT } from './systems.js';
+import { buildShell, buildReflections } from './shell.js';
 
 const D2R = Math.PI / 180;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -29,23 +30,15 @@ export function buildDeck(renderer) {
   const panels = [], ctls = {}, hits = [], extraAnims = [];
   const addPanel = (P, parent = root) => { P.finish(); parent.add(P.group); panels.push(P); Object.assign(ctls, P.ctls); hits.push(...P.hits); return P; };
 
-  /* ================= materials for the shell ================= */
-  const fabG = TX.fabric('#8d9298', '#7c8288', 3, 4), carpet = TX.fabric('#2c2f33', '#383c41', 2, 8), seatF = TX.fabric('#2a2d31', '#363a3f', 2, 12);
-  const lining = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, color: 0x858c92, roughness: 0.88, map: tx(TX.grain(256, 256, 200, 22, 3), { repeat: [3, 3] }) });
-  const liningDk = new THREE.MeshStandardMaterial({ color: 0x6e767c, roughness: 0.8, side: THREE.DoubleSide });
-  const glare = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.92, map: tx(TX.fabric('#1e2023', '#2a2d30', 2, 3).map, { repeat: [16, 3] }) });
+  /* ================= shell (see shell.js) ================= */
+  const carpet = TX.fabric('#2c2f33', '#383c41', 2, 8), gfab = TX.fabric('#1e2023', '#2a2d30', 2, 3);
+  const glare = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.95, map: tx(gfab.map, { repeat: [40, 6] }), normalMap: tx(gfab.normal, { srgb: false, repeat: [40, 6] }), normalScale: new THREE.Vector2(0.6, 0.6) });
   const carpetM = new THREE.MeshStandardMaterial({ map: tx(carpet.map, { repeat: [6, 6] }), normalMap: tx(carpet.normal, { srgb: false, repeat: [6, 6] }), roughness: 1 });
-  const L = TX.leather([40, 42, 46], 3);
-  const leather = new THREE.MeshStandardMaterial({ map: tx(L.map), normalMap: tx(L.normal, { srgb: false }), normalScale: new THREE.Vector2(0.7, 0.7), roughness: 0.55 });
-  const seatFab = new THREE.MeshStandardMaterial({ map: tx(seatF.map, { repeat: [3, 3] }), normalMap: tx(seatF.normal, { srgb: false, repeat: [3, 3] }), roughness: 0.95 });
-  const frameM = new THREE.MeshStandardMaterial({ color: 0x474e55, roughness: 0.6, metalness: 0.15 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0xdfeaf2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.035, envMapIntensity: 0.18, depthWrite: false, side: THREE.DoubleSide });
-
   /* shell geometry collected per material and merged */
   const shell = new Map();
+  const cleanG = geo => { const g = geo.index ? geo.toNonIndexed() : geo.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); if (!g.attributes.normal) g.computeVertexNormals(); return g; };
   const S = (geo, mat, pos, rot, scale) => {
-    const g = geo.index ? geo.toNonIndexed() : geo.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
-    if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    const g = cleanG(geo);
     const m4 = new THREE.Matrix4().compose(pos || V(0, 0, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(rot || [0, 0, 0]), 'YXZ')), scale || V(1, 1, 1)); g.applyMatrix4(m4);
     if (!shell.has(mat)) shell.set(mat, []); shell.get(mat).push(g);
   };
@@ -54,62 +47,23 @@ export function buildDeck(renderer) {
     g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); const w = a.distanceTo(b) * uvScale, h = a.distanceTo(d) * uvScale;
     g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, w, 0, w, h, 0, 0, w, h, 0, h], 2)); g.computeVertexNormals(); S(g, mat);
   };
-  // window frame member: flat profile (wide face turned towards the cabin), slightly rounded
-  const post = (a, b, r, mat = frameM) => {
-    const mid = a.clone().lerp(b, 0.5), d = b.clone().sub(a), len = d.length(); const y = d.normalize();
-    const inward = V(0, 1.25, 0.1).sub(mid); const z = inward.sub(y.clone().multiplyScalar(inward.dot(y))).normalize(); const x = y.clone().cross(z).normalize();
-    const g0 = new RoundedBoxGeometry(r * 2.3, len + r * 1.6, r * 1.1, 2, Math.min(r * 0.5, 0.012)); const g = g0.index ? g0.toNonIndexed() : g0;
-    g.applyMatrix4(new THREE.Matrix4().makeBasis(x, y, z).setPosition(mid)); if (!shell.has(mat)) shell.set(mat, []); shell.get(mat).push(g);
-  };
-
-  /* ================= windows ================= */
-  const glassMeshes = [], panes = [];
-  const pane = (pts) => { const g = new THREE.BufferGeometry(); const [a, b, c, d] = pts; g.setAttribute('position', new THREE.Float32BufferAttribute([a, b, c, a, c, d].flatMap(v => [v.x, v.y, v.z]), 3)); g.computeVertexNormals(); const m = new THREE.Mesh(g, glass); m.renderOrder = 3; root.add(m); glassMeshes.push(m); };
-  for (const sd of [-1, 1]) {
-    const X = v => V(v.x * sd, v.y, v.z);
-    // front pane: bottom-inner, bottom-outer, top-outer, top-inner
-    const fp = [V(0.025, 1.035, -1.06), V(0.84, 1.035, -0.935), V(0.79, 1.66, -0.64), V(0.025, 1.70, -0.75)].map(X);
-    pane(fp); panes.push(fp);
-    post(fp[1], fp[2], 0.038); post(fp[0], fp[1], 0.02); post(fp[3], fp[2], 0.03);
-    // side windows (front sliding + rear fixed)
-    const sw1 = [V(0.88, 1.03, -0.88), V(1.0, 1.0, -0.36), V(0.93, 1.56, -0.4), V(0.83, 1.62, -0.62)].map(X);
-    const sw2 = [V(1.01, 0.99, -0.30), V(1.04, 0.98, 0.14), V(0.97, 1.5, 0.14), V(0.94, 1.55, -0.34)].map(X);
-    pane(sd > 0 ? sw1 : [sw1[1], sw1[0], sw1[3], sw1[2]]); pane(sd > 0 ? sw2 : [sw2[1], sw2[0], sw2[3], sw2[2]]);
-    for (const w of [sw1, sw2]) { post(w[0], w[1], 0.03); post(w[1], w[2], 0.04); post(w[2], w[3], 0.035); post(w[3], w[0], 0.04); }
-    // sliding window handle
-    S(new RoundedBoxGeometry(0.02, 0.08, 0.03, 2, 0.006), M.black, X(V(0.97, 1.18, -0.42)));
-    // sidewall below the windows, lining above to the overhead
-    quad(X(V(1.06, 0.0, -0.95)), X(V(1.06, 0.0, 0.9)), X(V(1.04, 0.98, 0.9)), X(V(0.98, 1.0, -0.95)), lining, 2);
-    quad(X(V(0.98, 1.0, -0.95)), X(V(1.04, 0.98, 0.9)), X(V(1.06, 0.95, 0.9)), X(V(0.88, 1.03, -0.88)), lining, 2);
-    quad(X(V(0.97, 1.5, 0.14)), X(V(0.98, 1.55, 0.95)), X(V(0.40, 2.12, 0.95)), X(V(0.38, 2.08, 0.16)), lining, 2);
-    quad(X(V(0.83, 1.62, -0.62)), X(V(0.97, 1.5, 0.14)), X(V(0.38, 2.08, 0.16)), X(V(0.36, 1.86, -0.62)), lining, 2);
-    quad(X(V(0.79, 1.66, -0.64)), X(V(0.83, 1.62, -0.62)), X(V(0.36, 1.86, -0.62)), X(V(0.025, 1.70, -0.75)), liningDk, 2);
-    quad(X(V(1.04, 0.98, 0.14)), X(V(1.04, 0.98, 0.9)), X(V(0.98, 1.55, 0.95)), X(V(0.97, 1.5, 0.14)), lining, 2);
-    // side console with sidestick, tiller, armrest
-    const cx = sd * 0.93;
-    S(new RoundedBoxGeometry(0.26, 0.66, 1.15, 3, 0.02), liningDk, V(cx, 0.33, -0.1));
-    S(new THREE.BoxGeometry(0.22, 0.012, 0.9), M.paintDark, V(cx - sd * 0.01, 0.666, -0.1));
-    S(new THREE.CylinderGeometry(0.035, 0.045, 0.03, 20), M.black, V(cx - sd * 0.01, 0.685, -0.2));
-    const stk = new THREE.CapsuleGeometry(0.018, 0.11, 6, 12); S(stk, M.black, V(cx - sd * 0.01, 0.77, -0.19), [0, 0, -sd * 0.12]);
-    S(new THREE.SphereGeometry(0.024, 14, 10), M.black, V(cx - sd * 0.02, 0.84, -0.18));
-    S(new THREE.CylinderGeometry(0.05, 0.05, 0.012, 24), M.black, V(cx - sd * 0.02, 0.69, -0.48));
-    S(new RoundedBoxGeometry(0.09, 0.06, 0.34, 3, 0.02), leather, V(cx + sd * 0.02, 0.73, 0.18));
-  }
-  // centre windscreen post
-  post(V(0, 1.03, -1.07), V(0, 1.71, -0.755), 0.03);
+  const SH = buildShell({ S, quad, root, tx, aniso, push: (mat, g) => { if (!shell.has(mat)) shell.set(mat, []); shell.get(mat).push(cleanG(g)); }, merge: list => mergeGeometries(list.map(cleanG), false) });
+  const { lining, liningDk, glass, leather } = SH; const glassMeshes = SH.glassMeshes, panes = SH.panes;
   // windscreen header + ceiling
   S(new RoundedBoxGeometry(1.7, 0.08, 0.12, 2, 0.03), liningDk, V(0, 1.74, -0.70), [0.35, 0, 0]);
-  quad(V(-0.40, 2.12, 0.95), V(0.40, 2.12, 0.95), V(0.38, 2.08, 0.16), V(-0.38, 2.08, 0.16), lining, 2);
+  quad(V(-0.40, 2.12, 1.6), V(0.40, 2.12, 1.6), V(0.38, 2.08, 0.16), V(-0.38, 2.08, 0.16), lining, 2);
   // ceiling vault behind everything above the windows (closes gaps around the overhead panel)
-  { const g = new THREE.CylinderGeometry(1.3, 1.3, 1.75, 40, 1, true, Math.PI / 2 + 0.45, Math.PI - 0.9); const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x5f666c, roughness: 0.9, side: THREE.BackSide })); m.rotation.x = Math.PI / 2; m.position.set(0, 0.9, 0.09); m.receiveShadow = true; root.add(m); }
+  { const g = new THREE.CylinderGeometry(1.3, 1.3, 2.45, 40, 1, true, Math.PI / 2 + 0.45, Math.PI - 0.9); const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x5f666c, roughness: 0.9, side: THREE.BackSide })); m.rotation.x = Math.PI / 2; m.position.set(0, 0.9, 0.42); m.receiveShadow = true; root.add(m); }
   // close the vault above the windscreen header (no sky leaks round the front of the overhead)
   S(new THREE.PlaneGeometry(1.8, 0.62), liningDk, V(0, 2.03, -0.775));
   S(new THREE.PlaneGeometry(0.80, 0.30), liningDk, V(0, 1.80, -0.69), [-1.0, 0, 0]);
   // floor, rear bulkhead with door
-  S(new THREE.PlaneGeometry(2.2, 2.2), carpetM, V(0, 0, 0.0), [-Math.PI / 2, 0, 0]);
-  quad(V(1.06, 0, 0.92), V(-1.06, 0, 0.92), V(-0.40, 2.12, 0.95), V(0.40, 2.12, 0.95), lining, 2);
-  S(new RoundedBoxGeometry(0.62, 1.9, 0.04, 2, 0.01), liningDk, V(0.0, 0.95, 0.91));
-  S(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 10), M.metal, V(0.25, 1.0, 0.88), [0, 0, Math.PI / 2]);
+  S(new THREE.PlaneGeometry(2.2, 2.9), carpetM, V(0, 0, 0.3), [-Math.PI / 2, 0, 0]);
+  quad(V(1.06, 0, 1.6), V(-1.06, 0, 1.6), V(-0.40, 2.12, 1.6), V(0.40, 2.12, 1.6), lining, 2);
+  S(new RoundedBoxGeometry(0.42, 0.06, 0.36, 3, 0.02), M.darkMetal, V(0.62, 0.55, 1.42)); S(new RoundedBoxGeometry(0.42, 0.5, 0.08, 3, 0.03), M.bezel, V(0.62, 0.85, 1.55));   // folded observer seat
+  S(new RoundedBoxGeometry(0.5, 0.7, 0.06, 2, 0.01), M.paintDark, V(-0.62, 1.1, 1.57));                                                             // rear circuit-breaker panel
+  S(new RoundedBoxGeometry(0.62, 1.9, 0.04, 2, 0.01), liningDk, V(0.0, 0.95, 1.58));
+  S(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 10), M.metal, V(0.25, 1.0, 1.55), [0, 0, Math.PI / 2]);
 
   /* ================= glareshield ================= */
   {
@@ -118,6 +72,11 @@ export function buildDeck(renderer) {
     S(new THREE.CapsuleGeometry(0.022, 1.94, 4, 12), glare, V(0, 1.045, -0.80), [0, 0, Math.PI / 2]);
     S(new THREE.BoxGeometry(1.98, 0.012, 0.16), glare, V(0, 0.955, -0.86));
   }
+  // stitched edge of the anti-glare cover
+  { const c = document.createElement('canvas'); c.width = 2048; c.height = 16; const x = c.getContext('2d'); x.fillStyle = 'rgba(160,166,172,0.9)'; for (let i = 0; i < 2048; i += 12) x.fillRect(i, 6, 7, 3); const t = tx(c); t.wrapS = THREE.RepeatWrapping; t.repeat.set(2, 1);
+    const sm = new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 });
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(1.92, 0.006), sm); top.rotation.x = -Math.PI / 2; top.position.set(0, 1.0675, -0.80); root.add(top);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(1.92, 0.006), sm); front.position.set(0, 1.046, -0.7775); root.add(front); }
   // light strip under the glareshield (panel flood)
   const flood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.004, 0.012), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff2d8, emissiveIntensity: 0 })); flood.position.set(0, 0.948, -0.80); root.add(flood);
 
@@ -192,7 +151,6 @@ export function buildDeck(renderer) {
   // knee panel / lower structure
   S(new THREE.BoxGeometry(1.96, 0.34, 0.16), M.paintDark, V(0, 0.26, -0.98));
   S(new THREE.BoxGeometry(1.96, 0.05, 0.3), liningDk, V(0, 0.07, -1.0));
-  for (const sd of [-1, 1]) for (const dx of [-0.09, 0.09]) { S(new RoundedBoxGeometry(0.07, 0.16, 0.025, 2, 0.008), M.black, V(sd * 0.53 + dx, 0.14, -0.82), [-0.5, 0, 0]); S(new THREE.CylinderGeometry(0.008, 0.008, 0.22, 8), M.darkMetal, V(sd * 0.53 + dx, 0.2, -0.9), [0.7, 0, 0]); }
 
   /* ================= glareshield panels: FCU, EFIS + master lights ================= */
   const gsg = new THREE.Group(); gsg.position.set(0, 1.0, -0.772); gsg.rotation.x = -8 * D2R; root.add(gsg);
@@ -488,20 +446,6 @@ export function buildDeck(renderer) {
     const g = P.group; g.position.set(0, 0.442, -0.10); g.rotation.x = -Math.PI / 2; addPanel(P, ped);
   }
 
-  /* ================= seats ================= */
-  for (const sx of [-0.53, 0.53]) {
-    // cushion with side bolsters, curved back built from tilted segments, headrest, armrests, column and rails
-    S(new RoundedBoxGeometry(0.46, 0.11, 0.48, 4, 0.045), leather, V(sx, 0.47, 0.33));
-    for (const sd of [-1, 1]) S(new RoundedBoxGeometry(0.07, 0.10, 0.46, 3, 0.03), leather, V(sx + sd * 0.215, 0.50, 0.33));
-    for (let k = 0; k < 5; k++) { const y = 0.60 + k * 0.13, z = 0.58 + k * 0.025 + k * k * 0.004; S(new RoundedBoxGeometry(0.46 - k * 0.012, 0.14, 0.12, 4, 0.045), leather, V(sx, y, z), [0.16 + k * 0.02, 0, 0]); }
-    for (const sd of [-1, 1]) S(new RoundedBoxGeometry(0.06, 0.52, 0.13, 3, 0.03), leather, V(sx + sd * 0.235, 0.80, 0.62), [0.18, 0, 0]);
-    S(new RoundedBoxGeometry(0.26, 0.17, 0.11, 4, 0.05), leather, V(sx, 1.32, 0.76), [0.2, 0, 0]);
-    S(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 10), M.metal, V(sx - 0.07, 1.22, 0.75)); S(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 10), M.metal, V(sx + 0.07, 1.22, 0.75));
-    for (const sd of [-1, 1]) { S(new RoundedBoxGeometry(0.075, 0.05, 0.34, 3, 0.022), leather, V(sx + sd * 0.30, 0.68, 0.38), [-0.05, 0, 0]); S(new THREE.BoxGeometry(0.025, 0.14, 0.03), M.darkMetal, V(sx + sd * 0.30, 0.6, 0.5)); }
-    S(new THREE.CylinderGeometry(0.06, 0.08, 0.38, 16), M.darkMetal, V(sx, 0.22, 0.36));
-    S(new RoundedBoxGeometry(0.36, 0.05, 0.42, 2, 0.015), M.darkMetal, V(sx, 0.40, 0.36));
-    for (const sd of [-1, 1]) S(new THREE.BoxGeometry(0.03, 0.03, 0.9), M.metal, V(sx + sd * 0.15, 0.015, 0.25));
-  }
   /* ---- merge the shell ---- */
   for (const [mat, list] of shell) { const g = mergeGeometries(list, false); const m = new THREE.Mesh(g, mat); m.castShadow = true; m.receiveShadow = true; root.add(m); }
 
@@ -576,7 +520,8 @@ export function buildDeck(renderer) {
   }
   function press(id, t) { pressT[id] = t; }
   root.updateMatrixWorld(true);
+  const reflections = buildReflections(root, panes, [DSP.pfd, DSP.nd, DSP.ewd, DSP.sd, DSP.pfdFO, DSP.ndFO, DSP.stby].filter(Boolean));
   function setIntegral(k, ovhd = k) { for (const P of panels) if (P.faceMat) P.faceMat.emissiveIntensity = (P.name === 'OVHD' || P.name === 'CB' ? ovhd : k) * 0.9; }
-  const api = { root, panels, ctls, hits, update, ctlWorld, areaWorld, press, glass: glassMeshes, panes, setIntegral, flood, DSP, refont() { for (const P of panels) { P.redraw(); } } };
+  const api = { root, panels, ctls, hits, update, ctlWorld, areaWorld, press, glass: glassMeshes, panes, setIntegral, flood, DSP, reflections, refont() { for (const P of panels) { P.redraw(); } } };
   return api;
 }

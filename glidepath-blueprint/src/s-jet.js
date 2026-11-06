@@ -13,10 +13,11 @@ import { createJetAudio } from './jet/audio.js';
 import { createChecklist } from './jet/checklist.js';
 import { createHUD } from './jet/hud.js';
 import { createFinishPass } from './jet/post.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const PRESETS = {
-  captain: { pos: EYE.clone(), target: V(-0.50, 1.27, -1.0), fov: 68, label: 'Captain' },
+  captain: { pos: V(-0.53, 1.17, 0.14), target: V(-0.45, 1.25, -1.0), fov: 70, label: 'Captain' },
   overhead: { pos: V(-0.02, 1.07, 0.05), target: V(0.0, 1.875, -0.34), fov: 54, label: 'Overhead' },
   pedestal: { pos: V(-0.30, 1.16, 0.10), target: V(0.0, 0.42, -0.38), fov: 58, label: 'Pedestal' },
   displays: { pos: V(-0.34, 1.12, -0.12), target: V(-0.26, 0.70, -0.90), fov: 56, label: 'Displays' }
@@ -24,9 +25,9 @@ const PRESETS = {
 const PANEL_VIEW = { OVHD: 'overhead', CB: 'overhead', PED: 'pedestal', 'PED-F': 'pedestal', 'MIP-CAPT': 'displays', 'MIP-CTR': 'displays', 'MIP-FO': 'displays', FCU: 'captain', 'EFIS-L': 'captain', 'EFIS-R': 'captain' };
 const PANEL_NAME = { OVHD: 'overhead panel', CB: 'overhead panel', PED: 'pedestal', 'PED-F': 'pedestal', 'MIP-CAPT': 'main panel', 'MIP-CTR': 'main panel', 'MIP-FO': 'main panel', FCU: 'glareshield', 'EFIS-L': 'glareshield', 'EFIS-R': 'glareshield' };
 const TOD = {
-  day: { label: 'Day', el: 33, az: 78, sun: 0xfff1df, sunI: 3.6, hemi: 0.13, hs: 0xd8e4f0, hg: 0x6a6a64, exp: 0.84, env: 0.7, turb: 3.5, ray: 1.3, integ: 0, beams: 0.035, fog: 0xc4d2de, night: 0 },
-  dusk: { label: 'Dusk', el: 4.5, az: -72, sun: 0xff9550, sunI: 2.8, hemi: 0.16, hs: 0x8a90bc, hg: 0x2a2620, exp: 1.35, env: 0.5, turb: 7, ray: 2.8, integ: 0.75, beams: 0.12, fog: 0xbf9a86, night: 0.6 },
-  night: { label: 'Night', el: -12, az: -64, sun: 0x8aa0ff, sunI: 0, hemi: 0.05, hs: 0x1c2840, hg: 0x050607, exp: 1.55, env: 0.1, turb: 2, ray: 0.6, integ: 1, beams: 0, fog: 0x0a0f17, night: 1 }
+  day: { label: 'Day', el: 50, az: 34, mie: 0.002, bloom: [40, 0.35], fogD: [1400, 16000], sun: 0xfff3e2, sunI: 3.6, hemi: 0.1, hs: 0xd8e4f0, hg: 0x6a6a64, exp: 0.6, env: 0.7, turb: 2.2, ray: 2.0, integ: 0, beams: 0, fog: 0xc8d6e2, night: 0, area: [0xdbe8f5, 0.7], refl: 0.05 },
+  dusk: { label: 'Dusk', el: 5, az: -66, mie: 0.006, bloom: [7, 0.55], fogD: [600, 8000], sun: 0xffaa70, sunI: 2.4, hemi: 0.16, hs: 0x8f96c4, hg: 0x2a2620, exp: 1.25, env: 0.5, turb: 6, ray: 2.6, integ: 0.75, beams: 0.022, fog: 0xc8a896, night: 0.6, area: [0xd9b9b8, 1.1], refl: 0.16 },
+  night: { label: 'Night', el: -12, az: -64, mie: 0.005, bloom: [6, 0.6], fogD: [400, 6000], sun: 0x8aa0ff, sunI: 0, hemi: 0.06, hs: 0x1c2840, hg: 0x050607, exp: 1.5, env: 0.12, turb: 2, ray: 0.6, integ: 1, beams: 0, fog: 0x0a0f17, night: 1, area: [0x4a5a80, 0.16], refl: 0.22 }
 };
 
 export default function (host) {
@@ -35,10 +36,13 @@ export default function (host) {
   S.controls.enabled = false; S.controls.update = () => false;
   cam.rotation.order = 'YXZ';
   const sky = addSky(S, { elevation: 34, azimuth: -38, turbidity: 3.5, rayleigh: 1.3, scale: 6000, exposure: 0.8, envIntensity: 0.7, sunIntensity: 3.4, hemi: 0.3, groundColor: 0x6a6a64, shadow: { extent: 2.0, size: 2048 } });
-  R.toneMapping = THREE.ACESFilmicToneMapping;
+  R.toneMapping = THREE.ACESFilmicToneMapping; R.localClippingEnabled = true; RectAreaLightUniformsLib.init();
   Object.assign(sky.light.shadow.camera, { near: 20, far: 100 }); sky.light.shadow.bias = -0.0006; sky.light.shadow.normalBias = 0.01; sky.light.shadow.camera.updateProjectionMatrix();
   S.scene.fog = new THREE.Fog(0xc4d2de, 400, 5200);
   const fill = new THREE.PointLight(0xfff4e6, 0.3, 3.2, 1.6); fill.position.set(0, 1.85, 0.45); S.scene.add(fill);
+  // soft sky light from the windscreen and side windows (area lights): no crushed blacks at dusk, gentle gradients by day
+  const skyWin = new THREE.RectAreaLight(0xdbe8f5, 2, 1.7, 0.62); skyWin.position.set(0, 1.36, -0.9); skyWin.lookAt(0, 1.0, 0.4); S.scene.add(skyWin);
+  const sideWin = [-1, 1].map(sd => { const l = new THREE.RectAreaLight(0xdbe8f5, 1, 0.85, 0.5); l.position.set(sd * 0.96, 1.28, -0.4); l.lookAt(0, 1.0, -0.2); S.scene.add(l); return l; });
   const dome = new THREE.PointLight(0xffe9c8, 0, 3.2, 1.3); dome.position.set(-0.05, 1.98, 0.62); S.scene.add(dome);
   const floodL = new THREE.SpotLight(0xffe2bc, 0, 1.6, 0.9, 0.8, 1.2); floodL.position.set(0, 0.95, -0.80); floodL.target.position.set(0, 0.55, -0.95); S.scene.add(floodL, floodL.target);
   const finish = createFinishPass(); S.composer.addPass(finish);
@@ -75,13 +79,16 @@ export default function (host) {
   function setTOD(k) {
     tod = k; const T = todK = TOD[k]; const el = T.el * D2R, az = T.az * D2R;
     sky.sun.set(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
-    const u = sky.sky.material.uniforms; u.sunPosition.value.copy(sky.sun); u.turbidity.value = T.turb; u.rayleigh.value = T.ray;
+    const u = sky.sky.material.uniforms; u.sunPosition.value.copy(sky.sun); u.turbidity.value = T.turb; u.rayleigh.value = T.ray; u.mieCoefficient.value = T.mie; u.mieDirectionalG.value = 0.74;
     sky.light.color.setHex(T.sun); sky.light.intensity = T.sunI; sky.light.position.copy(sky.sun).multiplyScalar(60).add(V(0, 1.2, -0.3)); sky.light.target.position.set(0, 1.2, -0.3);
     sky.hemi.color.setHex(T.hs); sky.hemi.groundColor.setHex(T.hg); sky.hemi.intensity = T.hemi;
-    R.toneMappingExposure = T.exp; S.envFromScene(envScene); S.scene.environmentIntensity = T.env; interiorEnv(T); S.scene.fog.color.setHex(T.fog);
+    if (S.bloomPass) { S.bloomPass.threshold = T.bloom[0]; S.bloomPass.strength = T.bloom[1]; }
+    R.toneMappingExposure = T.exp; S.envFromScene(envScene); S.scene.environmentIntensity = T.env; interiorEnv(T); S.scene.fog.color.setHex(T.fog); S.scene.fog.near = T.fogD[0]; S.scene.fog.far = T.fogD[1];
     beamMat.uniforms.uI.value = T.beams; beamMat.uniforms.uCol.value.setHex(T.sun); if (T.beams > 0) buildBeams(sky.sun);
     if (beams) beams.visible = T.beams > 0;
     apt.setNight(T.night); fill.intensity = 0.3 * (1 - T.night * 0.85);
+    skyWin.color.setHex(T.area[0]); skyWin.intensity = T.area[1]; for (const l of sideWin) { l.color.setHex(T.area[0]); l.intensity = T.area[1] * 0.6; }
+    deck.reflections.setStrength(T.refl);
     HUDsync();
   }
 

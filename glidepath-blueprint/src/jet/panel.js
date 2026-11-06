@@ -254,7 +254,7 @@ export function createPanel(o) {
     const L = opt.len || 0.021;
     const lev = new THREE.Mesh(new THREE.CylinderGeometry(0.0021, 0.0027, L, 12), M.metal); lev.rotation.x = Math.PI / 2; lev.position.z = L / 2; piv.add(lev);
     const tip = new THREE.Mesh(opt.paddle ? new RoundedBoxGeometry(0.0085, 0.006, 0.010, 2, 0.002) : new THREE.SphereGeometry(0.0034, 14, 10), opt.paddle ? M.knob : M.metal); tip.position.z = L + 0.002; piv.add(tip);
-    lev.castShadow = tip.castShadow = true;
+    lev.castShadow = tip.castShadow = false; // tiny: not worth a shadow-pass draw call
     hit(lev, id); hit(tip, id);
     // hit helper (bigger, invisible)
     const hb = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.03, 0.03), new THREE.MeshBasicMaterial({ visible: false })); hb.position.set(p.x, p.y, 0.015); P.group.add(hb); hit(hb, id);
@@ -273,7 +273,7 @@ export function createPanel(o) {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.05, 0.007, 28), M.knob); base.rotation.x = Math.PI / 2; base.position.z = 0.0035; piv.add(base);
     const bar = new THREE.Mesh(new RoundedBoxGeometry(r * 0.75, r * 2.6, 0.011, 2, 0.0018), M.knob); bar.position.set(0, 0, 0.012); piv.add(bar);
     const ln = new THREE.Mesh(new THREE.BoxGeometry(r * 0.16, r * 1.15, 0.0008), M.white); ln.position.set(0, r * 0.62, 0.0177); piv.add(ln);
-    base.castShadow = bar.castShadow = true;
+    base.castShadow = bar.castShadow = false;
     hit(base, id); hit(bar, id);
     const ang = opt.angles || [-50, 0, 50];
     const R = r * (opt.legendR || 2.05);

@@ -25,7 +25,7 @@ Open `dist/index.html` through any static server (e.g. `npx serve dist`).
 - `src/core.js` – shared stage (renderer, post-processing, labels, UI helpers)
 - `src/s-*.js` – one file per scene; `src/boot.js` lazy-starts each `[data-scene]`
 - `src/sim/` – light-aircraft flight model, world, volumetric clouds, weather, sound, VR, cockpit
-- `src/jet/` – jet trainer: `systems.js` (systems model, no three.js), `flows.js` (steps, scenarios, scoring), `deck.js` / `panel.js` / `displays.js` (3D flight deck), `hud.js` (overlay UI)
+- `src/jet/` – jet trainer: `systems.js` (systems model, no three.js), `flows.js` (steps, scenarios, scoring), `deck.js` / `panel.js` / `displays.js` (3D flight deck), `shell.js` (windows, frames, sidewalls, consoles, seats, contact shadows, windscreen reflections), `airport.js` (apron, terminal, taxiway and runway lights), `hud.js` (overlay UI)
 - `assets/` – earth textures for the globe scene
 
 ## Tests
