@@ -10,6 +10,8 @@ import { CTL, operate, valueText, fmsId } from './jet/controls.js';
 import { buildDeck, EYE } from './jet/deck.js';
 import { drawSD } from './jet/displays.js';
 import { buildAirport } from './jet/airport.js';
+import { buildExterior, buildTug } from './jet/exterior.js';
+import { COCKPIT, GROUND, P as LP, PUSH_END, METAR, toSN, nearest, TAXI_PATH, HOLD, RWY, YAW_RWY } from './jet/layout.js';
 import { createJetAudio } from './jet/audio.js';
 import { createChecklist } from './jet/checklist.js';
 import { createHUD } from './jet/hud.js';
@@ -38,6 +40,8 @@ export default function (host) {
   cam.rotation.order = 'YXZ';
   const sky = addSky(S, { elevation: 34, azimuth: -38, turbidity: 3.5, rayleigh: 1.3, scale: 6000, exposure: 0.8, envIntensity: 0.7, sunIntensity: 3.4, hemi: 0.3, groundColor: 0x6a6a64, shadow: { extent: 2.0, size: 2048 } });
   R.toneMapping = THREE.ACESFilmicToneMapping; R.localClippingEnabled = true; RectAreaLightUniformsLib.init();
+  // a softer sun disk: the stock sky's disk is so bright that a low sun near the view floods the frame through the bloom
+  sky.sky.material.fragmentShader = sky.sky.material.fragmentShader.replace('( 760.0 * sundisc )', '( 60.0 * sundisc )'); sky.sky.material.needsUpdate = true;
   Object.assign(sky.light.shadow.camera, { near: 20, far: 100 }); sky.light.shadow.bias = -0.0006; sky.light.shadow.normalBias = 0.01; sky.light.shadow.camera.updateProjectionMatrix();
   S.scene.fog = new THREE.Fog(0xc4d2de, 400, 5200);
   const fill = new THREE.PointLight(0xfff4e6, 0.3, 3.2, 1.6); fill.position.set(0, 1.85, 0.45); S.scene.add(fill);
@@ -50,8 +54,16 @@ export default function (host) {
   S.onResize((w, h) => { finish.uniforms.uAspect.value = w / h; });
 
   const sys = createSystems({ fast: false });
-  const deck = buildDeck(R); S.scene.add(deck.root);
+  const deck = buildDeck(R);
   const apt = buildAirport(R); S.scene.add(apt.root);
+  // the aircraft: body frame at the main-gear point; the cockpit (deck frame) rides in it. Parked: cockpit at the origin.
+  const acft = new THREE.Group(); acft.name = 'aircraft'; S.scene.add(acft);
+  const cockpit = new THREE.Group(); cockpit.name = 'cockpit'; cockpit.position.set(0, COCKPIT.y, COCKPIT.z); acft.add(cockpit);
+  acft.position.set(0, GROUND, -COCKPIT.z); acft.updateMatrixWorld(true);
+  cockpit.add(deck.root, apt.ownNose);
+  for (const o of [fill, skyWin, ...sideWin, dome, floodL, floodL.target]) cockpit.attach(o);
+  const ext = buildExterior(); acft.add(ext.root); ext.root.visible = false;
+  const tug = buildTug(); S.scene.add(tug.group); tug.group.visible = false; let tugAway = -1;
   // interior surfaces see far less sky than the open environment map suggests: keep it for reflections only
   // (scene.environment ignores per-material intensity, so interior materials get the map explicitly)
   const interior = new Map();
@@ -71,7 +83,7 @@ export default function (host) {
     const pos = [], t = [], L = 2.2, d = dir.clone().multiplyScalar(-L);
     for (const P of deck.panes) { const far = P.map(p => p.clone().add(d)); for (let i = 0; i < 4; i++) { const a = P[i], b = P[(i + 1) % 4], c = far[(i + 1) % 4], e = far[i]; pos.push(a, b, c, a, c, e); t.push(0, 0, 1, 0, 1, 1); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos.flatMap(p => [p.x, p.y, p.z]), 3)); g.setAttribute('aT', new THREE.Float32BufferAttribute(t, 1));
-    beams = new THREE.Mesh(g, beamMat); beams.renderOrder = 4; beams.frustumCulled = false; S.scene.add(beams);
+    beams = new THREE.Mesh(g, beamMat); beams.renderOrder = 4; beams.frustumCulled = false; cockpit.add(beams);
   }
 
   /* ---------------- time of day ---------------- */
@@ -81,7 +93,7 @@ export default function (host) {
     tod = k; const T = todK = TOD[k]; const el = T.el * D2R, az = T.az * D2R;
     sky.sun.set(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
     const u = sky.sky.material.uniforms; u.sunPosition.value.copy(sky.sun); u.turbidity.value = T.turb; u.rayleigh.value = T.ray; u.mieCoefficient.value = T.mie; u.mieDirectionalG.value = 0.74;
-    sky.light.color.setHex(T.sun); sky.light.intensity = T.sunI; sky.light.position.copy(sky.sun).multiplyScalar(60).add(V(0, 1.2, -0.3)); sky.light.target.position.set(0, 1.2, -0.3);
+    sky.light.color.setHex(T.sun); sky.light.intensity = T.sunI; followSun();
     sky.hemi.color.setHex(T.hs); sky.hemi.groundColor.setHex(T.hg); sky.hemi.intensity = T.hemi;
     if (S.bloomPass) { S.bloomPass.threshold = T.bloom[0]; S.bloomPass.strength = T.bloom[1]; }
     R.toneMappingExposure = T.exp; S.envFromScene(envScene); S.scene.environmentIntensity = T.env; interiorEnv(T); S.scene.fog.color.setHex(T.fog); S.scene.fog.near = T.fogD[0]; S.scene.fog.far = T.fogD[1];
@@ -93,21 +105,64 @@ export default function (host) {
     HUDsync();
   }
 
+  /* the sun's shadow camera, the sky dome and the stars follow the aircraft */
+  const ckW = new THREE.Vector3();
+  let shadowOut = null;
+  function followSun() {
+    cockpit.getWorldPosition(ckW); const out = viewName === 'outside', o = out ? acft.position.clone().add(V(0, 4, 0)) : ckW.clone().add(V(0, 1.2, -0.3));
+    if (shadowOut !== out) { shadowOut = out; const c = sky.light.shadow.camera, e = out ? 30 : 2.0; Object.assign(c, { left: -e, right: e, top: e, bottom: -e, near: out ? 1 : 20, far: out ? 160 : 100 }); c.updateProjectionMatrix(); sky.light.shadow.normalBias = out ? 0.05 : 0.01; }
+    sky.light.target.position.copy(o); sky.light.position.copy(sky.sun).multiplyScalar(out ? 80 : 60).add(o); sky.light.target.updateMatrixWorld(); }
+
   /* ---------------- camera: presets, look, zoom ---------------- */
   const view = { pos: EYE.clone(), yaw: 0, pitch: 0, fov: 64 };
   let tween = null, viewName = 'captain', userLookT = -10, tAbs = 0;
   const dirYP = d => ({ yaw: Math.atan2(-d.x, -d.z), pitch: Math.asin(clamp(d.y / d.length(), -1, 1)) });
   function presetState(name) { const p = PRESETS[name]; const yp = dirYP(p.target.clone().sub(p.pos)); return { pos: p.pos.clone(), yaw: yp.yaw, pitch: yp.pitch, fov: p.fov }; }
   function goTo(st, dur = 1.0) { if (REDUCED) dur = 0.01; tween = { a: { pos: view.pos.clone(), yaw: view.yaw, pitch: view.pitch, fov: view.fov }, b: st, t: 0, dur }; }
-  function setView(name, instant = false) { viewName = name; const st = presetState(name); if (instant) { Object.assign(view, st); view.pos = st.pos.clone(); tween = null; } else goTo(st); if (vSeg && vSeg.v !== name) vSeg.set(name); hud.setView(name); }
-  function lookAtWorld(p, panel, dur = 1.0) {
+  const orbit = { yaw: 2.5, pitch: 0.16, dist: 62 };
+  function setView(name, instant = false) {
+    if (name === 'outside') { viewName = name; tween = null; view.fov = 50; if (vSeg && vSeg.v !== name) vSeg.set(name); hud.setView(name); return; }
+    viewName = name; const st = presetState(name); if (instant) { Object.assign(view, st); view.pos = st.pos.clone(); tween = null; } else goTo(st); if (vSeg && vSeg.v !== name) vSeg.set(name); hud.setView(name); }
+  function lookAtWorld(pw, panel, dur = 1.0) {
+    if (viewName === 'outside') setView('captain', true);
+    const p = cockpit.worldToLocal(pw.clone());
     const vn = PANEL_VIEW[panel] || 'captain', base = PRESETS[vn];
     if (vn === 'overhead' || vn === 'pedestal') { const off = p.clone().sub(base.target); off.x *= 0.75; const pos = base.pos.clone().add(off.multiplyScalar(0.8)); const yp = dirYP(p.clone().sub(pos)); goTo({ pos, yaw: yp.yaw, pitch: yp.pitch, fov: Math.min(base.fov, 50) }, dur); return; }
     const pos = base.pos.clone(); const yp = dirYP(p.clone().sub(pos)); goTo({ pos, yaw: yp.yaw, pitch: yp.pitch, fov: Math.min(base.fov, 52) }, dur); }
   function applyView(dt) {
     if (tween) { tween.t += dt; const k = clamp(tween.t / tween.dur, 0, 1), e = k * k * k * (k * (k * 6 - 15) + 10); const a = tween.a, b = tween.b;
       view.pos.lerpVectors(a.pos, b.pos, e); let dy = b.yaw - a.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); view.yaw = a.yaw + dy * e; view.pitch = a.pitch + (b.pitch - a.pitch) * e; view.fov = a.fov + (b.fov - a.fov) * e; if (k >= 1) tween = null; }
-    cam.position.copy(view.pos); cam.rotation.set(view.pitch, view.yaw, 0, 'YXZ'); if (Math.abs(cam.fov - view.fov) > 0.01) { cam.fov = view.fov; cam.updateProjectionMatrix(); }
+    if (Math.abs(cam.fov - view.fov) > 0.01) { cam.fov = view.fov; cam.updateProjectionMatrix(); }
+    if (viewName === 'outside') {   // chase / orbit around the aircraft, relative to its heading
+      const F = sys.st.fdm, c = acft.localToWorld(V(0, 3.2, -2)), yaw = F.yaw + orbit.yaw;
+      cam.position.set(c.x + Math.sin(yaw) * Math.cos(orbit.pitch) * orbit.dist, Math.max(GROUND + 1.5, c.y + Math.sin(orbit.pitch) * orbit.dist), c.z + Math.cos(yaw) * Math.cos(orbit.pitch) * orbit.dist);
+      cam.lookAt(c); return;
+    }
+    // cockpit: the head rides with the aircraft; smoothed g-lean and runway vibration
+    const F = sys.st.fdm, gs = F.onGround ? F.gs : 0, amp = REDUCED ? 0 : (gs > 1 ? 0.0004 + 0.0022 * Math.min(1, gs / 140) : 0);
+    head.lean += (clamp(-(F.ax || 0) * 0.006, -0.03, 0.03) - head.lean) * Math.min(1, dt * 3);
+    const vib = amp * (Math.sin(tAbs * 71) * 0.6 + Math.sin(tAbs * 113 + 1.3) * 0.4) + (gs > 20 && Math.random() < dt * 0.6 ? amp * 3 : 0);
+    head.v += (vib - head.v) * 0.5;
+    const lp = view.pos.clone().add(V(0, head.v, -head.lean));
+    cockpit.updateMatrixWorld(true);
+    cam.position.copy(cockpit.localToWorld(lp));
+    cam.quaternion.copy(cockpit.getWorldQuaternion(new THREE.Quaternion())).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(view.pitch + head.v * 0.8, view.yaw, 0, 'YXZ')));
+  }
+  const head = { lean: 0, v: 0 };
+  /* aircraft pose from the flight model */
+  function poseAircraft() {
+    const F = sys.st.fdm; acft.position.set(F.x, GROUND + F.h, F.z); acft.rotation.set(F.pitch, F.yaw, -F.roll, 'YXZ'); acft.updateMatrixWorld(true);
+    const out = viewName === 'outside'; ext.root.visible = out; deck.root.visible = !out; apt.ownNose.visible = !out;
+    if (beams) beams.visible = !out && todK.beams > 0 && Math.abs(F.yaw) < 0.02 && Math.abs(F.x) < 0.5;
+    cam.getWorldPosition(ckW); sky.sky.position.copy(ckW); if (apt.stars) apt.stars.position.copy(ckW);
+    // glare: a low sun in front of the camera would wash the whole frame out through the bloom; soften it
+    if (S.bloomPass) { const fwd = V(0, 0, -1).applyQuaternion(cam.quaternion), moving = sys.st.fdm.gs > 1 || !sys.st.fdm.onGround || Math.abs(sys.st.fdm.yaw) > 0.05, k = moving ? clamp((fwd.dot(sky.sun) - 0.5) / 0.4, 0, 1) : 0; S.bloomPass.strength = todK.bloom[1] * (1 - 0.5 * k); S.bloomPass.threshold = todK.bloom[0] * (1 + 2 * k); }
+    followSun();
+    // pushback tug: attached ahead of the nose gear while pushing, then it drives away
+    const pu = F.push;
+    if (pu && !pu.gone) { tug.group.visible = true; const p = acft.localToWorld(V(0, 0, -12.6 - 7.6)); tug.group.position.set(p.x, GROUND, p.z); tug.group.rotation.set(0, F.yaw, 0); tugAway = 0; tug.beacon.visible = (tAbs % 0.8) < 0.4; }
+    else if (pu && pu.gone && tugAway >= 0 && tugAway < 14) { tugAway += 1 / 60; const k = tugAway; tug.group.rotation.y += 0.006; tug.group.position.x += -Math.sin(tug.group.rotation.y) * 0.05 * Math.min(1, k); tug.group.position.z += -Math.cos(tug.group.rotation.y) * 0.05 * Math.min(1, k); if (tugAway >= 14) tug.group.visible = false; }
+    else if (!pu) tug.group.visible = false;
   }
 
   /* ---------------- immersive HUD (primary UI) ---------------- */
@@ -118,17 +173,19 @@ export default function (host) {
   const hud = createHUD(wrap, {
     show: () => showMe(), check: () => checkCurrent(), confirm: () => { if (flow.confirm()) audio.control('touch'); }, finish: () => flow.finish(),
     retry: () => start(scn), next: () => { const o = ['guided', 'practice', 'memory']; setMode(o[(o.indexOf(mode) + 1) % 3]); }, close: () => hud.hideDebrief(),
-    sound: () => toggleSound(), dock: () => hud.toggleDock()
+    sound: () => toggleSound(), dock: () => hud.toggleDock(),
+    flyInput: o => { Object.assign(touch, o); }, flyThr: (v, end) => { if (v != null) { sys.setSwitch('thr1', v); sys.setSwitch('thr2', v); } if (end) setThr((sys.sw.thr1 + sys.sw.thr2) / 2); },
+    flyStep: d => flyKey(d > 0 ? 'PageUp' : 'PageDown', true), flyAct: f => { if (f === 'gear') act({ id: 'gear' }); else if (f === 'flapsUp') act({ id: 'flaps' }, -1); else if (f === 'flapsDn') act({ id: 'flaps' }, 1); else if (f === 'push') act({ id: 'push' }); else if (f === 'park') act({ id: 'parkBrk' }); }
   });
   const root = hud.root;
-  hud.views(Object.entries(PRESETS).map(([k, p]) => [k, p.label]), 'captain', v => setView(v));
+  hud.views([...Object.entries(PRESETS).map(([k, p]) => [k, p.label]), ['outside', 'Outside']], 'captain', v => setView(v));
   function HUDsync() { hud.setGroup('mode', mode); hud.setGroup('scn', scn); hud.setGroup('tod', tod); hud.setGroup('fast', sys.fast ? 'fast' : 'real'); }
 
   /* ---------------- side column: compact mirror + accessible controls ---------------- */
   const U = ui(host);
   const mSeg = U.seg('mode', 'Mode', [['guided', 'Guided'], ['practice', 'Practice'], ['memory', 'Memory']], mode);
   const sSeg = U.seg('scn', 'Scenario', Object.entries(SCENARIOS).map(([k, s]) => [k, s.title]), scn);
-  vSeg = U.seg('view', 'View', Object.entries(PRESETS).map(([k, p]) => [k, p.label]), 'captain');
+  vSeg = U.seg('view', 'View', [...Object.entries(PRESETS).map(([k, p]) => [k, p.label]), ['outside', 'Outside']], 'captain');
   const box = host.querySelector('.controls');
   const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px'; box.appendChild(row);
   const mkBtn = (t, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-sm'; b.style.marginRight = '0'; b.textContent = t; b.addEventListener('click', fn); row.appendChild(b); return b; };
@@ -161,6 +218,8 @@ export default function (host) {
   hud.group('tod', Object.entries(TOD).map(([k, t]) => [k, t.label]), 'day', v => dSeg.set(v));
   hud.group('fast', [['real', 'Realistic'], ['fast', 'Fast start']], 'real', v => tSeg.set(v));
   hud.action('Reset to cold & dark', () => { resetCold(); hud.closeMenu(); }); hud.action('Skip to before start', () => { skipBefore(); hud.closeMenu(); });
+  hud.action('Flying controls help', () => { hud.toggleHelp(true); hud.closeMenu(); });
+  const flyB = hud.action('Hide on-screen controls', () => { hud.fly.setUser(!hud.fly.user); flyB.textContent = hud.fly.user ? 'Hide on-screen controls' : 'Show on-screen controls'; hud.closeMenu(); });
   const hudSoundB = hud.action('Sound on', () => toggleSound()); const hudVR = hud.action('Enter VR', () => enterVR()); hudVR.hidden = true;
   const CL = createChecklist(host);
 
@@ -201,6 +260,8 @@ export default function (host) {
     scn = k; const sc = SCENARIOS[k];
     sys.reset(sc.init); sys.fast = tSeg.v === 'fast';
     if (sc.fire) sys.fireInject = { ...sc.fire };
+    if (sc.rto) sys.st.rtoInject = { ...sc.rto };
+    tugAway = -1; hud.fly && hud.fly.show(!!sc.moving);
     flow = createFlow(sys, k, mode); debriefShown = false; hud.hideDebrief(); lastCurId = null;
     CL.render(flow, sys); hud.render(flow, sys);
     if (sSeg.v !== k) sSeg.set(k);
@@ -267,12 +328,23 @@ export default function (host) {
   cvs.addEventListener('pointerdown', e => { wrap.focus({ preventScroll: true }); hud.closeMenu(); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); cvs.setPointerCapture(e.pointerId);
     if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), fov: view.fov }; down = null; }
     else { down = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, moved: false, id: e.pointerId, t0: performance.now(), mod: e.shiftKey || e.altKey || e.button === 2 };
-      const pk = pickScreen(e.clientX, e.clientY); if (pk && pk.id && CTL[pk.id] && CTL[pk.id].k === 'knob') { down.knob = pk; down.steps = 0; } }
+      const pk = viewName === 'outside' ? null : pickScreen(e.clientX, e.clientY);
+      if (pk && pk.id && CTL[pk.id] && CTL[pk.id].k === 'knob') { down.knob = pk; down.steps = 0; }
+      if (pk && (pk.id === 'stickL' || pk.id === 'tiller' || pk.id === 'thr1' || pk.id === 'thr2')) { down.grab = pk; down.thr0 = [sys.sw.thr1, sys.sw.thr2]; down.shift = e.shiftKey; }
+      if (viewName === 'outside') down.orbit = { yaw: orbit.yaw, pitch: orbit.pitch }; }
     hud.tip.style.display = 'none'; });
   cvs.addEventListener('contextmenu', e => e.preventDefault());
   cvs.addEventListener('pointermove', e => {
     if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; view.fov = clamp(pinch.fov * pinch.d / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), 24, 78); tween = null; userLookT = tAbs; return; }
+    if (down && down.id === e.pointerId && down.orbit) { const dx = e.clientX - down.x, dy = e.clientY - down.y; if (Math.abs(dx) + Math.abs(dy) > 4) down.moved = true; orbit.yaw = down.orbit.yaw - dx * 0.006; orbit.pitch = clamp(down.orbit.pitch + dy * 0.004, -0.05, 1.2); return; }
+    if (down && down.id === e.pointerId && down.grab) { // drag a flying control: stick (spring-loaded), tiller (spring-loaded), thrust levers (stay put)
+      const dx = e.clientX - down.x, dy = e.clientY - down.y; if (Math.abs(dx) + Math.abs(dy) > 4) down.moved = true; if (!down.moved) return;
+      const id = down.grab.id;
+      if (id === 'stickL') { drag.roll = clamp(dx / 70, -1, 1); drag.pitch = clamp(dy / 70, -1, 1); }
+      else if (id === 'tiller') drag.tiller = clamp(dx / 80, -1, 1);
+      else { const d = -dy / 70; if (down.shift) sys.setSwitch(id, clamp(down.thr0[id === 'thr1' ? 0 : 1] + d, 0, 3)); else { sys.setSwitch('thr1', clamp(down.thr0[0] + d, 0, 3)); sys.setSwitch('thr2', clamp(down.thr0[1] + d, 0, 3)); } }
+      return; }
     if (down && down.id === e.pointerId && down.knob) { // drag on a knob turns it: up or right = clockwise, one detent per 14 px
       const n = Math.trunc(((e.clientX - down.x) - (e.clientY - down.y)) / 14); if (n !== down.steps) { act(down.knob, n - down.steps); down.steps = n; down.moved = true; } return; }
     if (down && down.id === e.pointerId) { const dx = e.clientX - down.x, dy = e.clientY - down.y; if (Math.abs(dx) + Math.abs(dy) > 6) down.moved = true; if (down.moved) { const k = view.fov / 64 * 0.0055; view.yaw = clamp(down.yaw + dx * k, -2.1, 2.1); view.pitch = clamp(down.pitch + dy * k, -1.25, 1.35); tween = null; userLookT = tAbs; } return; }
@@ -284,7 +356,9 @@ export default function (host) {
       if (t) { tip.innerHTML = t; tip.style.display = 'block'; tip.style.transform = `translate(${Math.min(e.clientX - r.left + 14, r.width - 270)}px,${Math.min(e.clientY - r.top + 16, r.height - 60)}px)`; cvs.style.cursor = id.startsWith('area:') ? 'grab' : 'pointer'; } else tip.style.display = 'none';
     } else { tip.style.display = 'none'; cvs.style.cursor = 'grab'; }
   });
-  const up = e => { const d = down; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!d || d.id !== e.pointerId) return; down = null; if (d.moved) return;
+  const up = e => { const d = down; pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!d || d.id !== e.pointerId) return; down = null;
+    if (d.grab && d.moved) { drag.pitch = drag.roll = drag.tiller = 0; if (d.grab.id.startsWith('thr')) { if (d.shift) setThr(sys.sw[d.grab.id], d.grab.id === 'thr1' ? 1 : 2); else setThr((sys.sw.thr1 + sys.sw.thr2) / 2); } return; }
+    if (d.moved || d.orbit) return;
     if (d.knob && CTL[d.knob.id].push) { act(d.knob, d.mod || e.shiftKey || e.altKey || performance.now() - d.t0 > 450 ? 'pull' : 'push'); return; }
     act(pickScreen(e.clientX, e.clientY)); };
   cvs.addEventListener('pointerup', up); cvs.addEventListener('pointercancel', e => { pts.delete(e.pointerId); down = null; pinch = null; });
@@ -292,14 +366,52 @@ export default function (host) {
   let wheelAcc = 0;
   cvs.addEventListener('wheel', e => { if (document.activeElement !== wrap && !e.ctrlKey) return; e.preventDefault();
     if (!e.ctrlKey) { const pk = pickScreen(e.clientX, e.clientY); if (pk && pk.id && CTL[pk.id] && CTL[pk.id].k === 'knob') { wheelAcc -= e.deltaY * (e.deltaMode === 1 ? 40 : 1); const n = Math.trunc(wheelAcc / 100); /* one detent per wheel notch; trackpads accumulate */ if (n) { wheelAcc = 0; act(pk, n * (e.shiftKey ? 10 : 1)); } return; } }
+    if (viewName === 'outside') { orbit.dist = clamp(orbit.dist * (1 + Math.sign(e.deltaY) * 0.1), 18, 260); return; }
     view.fov = clamp(view.fov * (1 + Math.sign(e.deltaY) * 0.08), 24, 78); tween = null; }, { passive: false });
   wrap.addEventListener('keydown', e => {
     if (e.target !== wrap) return; const k = e.key, st = 0.06;
     if (k === 'ArrowLeft') view.yaw += st; else if (k === 'ArrowRight') view.yaw -= st; else if (k === 'ArrowUp') view.pitch = Math.min(1.35, view.pitch + st); else if (k === 'ArrowDown') view.pitch = Math.max(-1.25, view.pitch - st);
     else if (k === '+' || k === '=') view.fov = Math.max(24, view.fov - 4); else if (k === '-') view.fov = Math.min(78, view.fov + 4);
-    else if ('1234'.includes(k)) setView(Object.keys(PRESETS)[+k - 1]); else return;
+    else if ('1234'.includes(k)) setView(Object.keys(PRESETS)[+k - 1]); else if (k === '5' || k === 'o' || k === 'O') setView(viewName === 'outside' ? 'captain' : 'outside');
+    else if (FLYKEYS.has(k.toLowerCase()) || ['PageUp', 'PageDown', 'Home', 'End'].includes(k)) { flyKey(k, true, e); e.preventDefault(); return; }
+    else return;
     e.preventDefault(); tween = null; userLookT = tAbs;
   });
+  wrap.addEventListener('keyup', e => { keys.delete(e.key.toLowerCase()); });
+  /* ---------------- flying inputs: keyboard, gamepad, 3D drag, on-screen controls ---------------- */
+  const FLYKEYS = new Set(['w', 's', 'a', 'd', 'q', 'e', 'z', 'c', 'b', ',', '.', 'g', 'f', 'v', 'p', 'h']);
+  const keys = new Set(); const drag = { pitch: 0, roll: 0, tiller: 0 }, touch = { pitch: 0, roll: 0, tiller: 0, brake: 0 }, kb = { pitch: 0, roll: 0, rudder: 0, tiller: 0 };
+  let gpName = '';
+  function setThr(v, which = 0) { v = clamp(v, 0, 3); for (const d of [0, 1, 2, 3]) if (Math.abs(v - d) < 0.07) v = d; for (const id of which ? ['thr' + which] : ['thr1', 'thr2']) act({ id }, { to: v }); }
+  function flyKey(k, down, e) {
+    const kl = k.toLowerCase(); if (down && e && e.repeat && !'wsadqezcb,.'.includes(kl)) return;
+    if ('wsadqezcb,.'.includes(kl)) { keys.add(kl); return; }
+    if (k === 'PageUp') setThr(Math.floor(Math.max(sys.sw.thr1, sys.sw.thr2) + 1e-6) + 1); else if (k === 'PageDown') setThr(Math.ceil(Math.min(sys.sw.thr1, sys.sw.thr2) - 1e-6) - 1);
+    else if (k === 'Home') setThr(0); else if (k === 'End') setThr(3);
+    else if (kl === 'g') act({ id: 'gear' }); else if (kl === 'f') act({ id: 'flaps' }, 1); else if (kl === 'v') act({ id: 'flaps' }, -1);
+    else if (kl === 'p') act({ id: 'push' }); else if (kl === 'h') hud.toggleHelp();
+  }
+  function readGamepad() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : []; let gp = null; for (const p of pads) if (p && p.connected) { gp = p; break; }
+    if (!gp) { gpName = ''; return null; } gpName = gp.id; const dz = v => Math.abs(v) < 0.08 ? 0 : v, ax = gp.axes;
+    const o = { roll: dz(ax[0] || 0), pitch: dz(ax[1] || 0) };
+    if (gp.mapping === 'standard') { o.yaw = dz(ax[2] || 0); o.brake = Math.max(gp.buttons[6]?.value || 0, gp.buttons[7]?.value || 0); o.thrUp = gp.buttons[5]?.pressed; o.thrDn = gp.buttons[4]?.pressed; }
+    else { if (ax.length > 2) o.throttle = (1 - ax[2]) / 2 * 3; if (ax.length > 3) o.yaw = dz(ax[3]); }
+    return o;
+  }
+  let gpThrT = 0;
+  function inputs(dt) {
+    const k = c => keys.has(c), ramp = (x, t, r) => x + clamp(t - x, -r * dt, r * dt);
+    kb.pitch = ramp(kb.pitch, (k('s') ? 1 : 0) - (k('w') ? 1 : 0), 2.5); kb.roll = ramp(kb.roll, (k('d') ? 1 : 0) - (k('a') ? 1 : 0), 3);
+    kb.rudder = ramp(kb.rudder, (k('e') ? 1 : 0) - (k('q') ? 1 : 0), 3); kb.tiller = ramp(kb.tiller, (k('c') ? 1 : 0) - (k('z') ? 1 : 0), 1.6);
+    const gp = readGamepad(), I = sys.st.inp, low = sys.st.fdm.onGround && sys.st.fdm.gs < 25;
+    I.pitch = clamp(kb.pitch + drag.pitch + touch.pitch + (gp ? gp.pitch : 0), -1, 1); I.roll = clamp(kb.roll + drag.roll + touch.roll + (gp ? gp.roll : 0), -1, 1);
+    I.rudder = clamp(kb.rudder + (gp && gp.yaw ? gp.yaw : 0) + (low ? 0 : touch.tiller), -1, 1);
+    I.tiller = clamp(kb.tiller + drag.tiller + (low ? touch.tiller : 0) + (gp && low && gp.yaw ? gp.yaw : 0), -1, 1);
+    const br = Math.max(k('b') ? 1 : 0, touch.brake, gp && gp.brake ? gp.brake : 0); I.brakeL = Math.max(br, k(',') ? 1 : 0); I.brakeR = Math.max(br, k('.') ? 1 : 0);
+    if (gp) { if (gp.throttle != null && Math.abs(gp.throttle - Math.max(sys.sw.thr1, sys.sw.thr2)) > 0.05) setThr(gp.throttle); gpThrT -= dt; if (gpThrT <= 0 && (gp.thrUp || gp.thrDn)) { gpThrT = 0.35; setThr(Math.max(sys.sw.thr1, sys.sw.thr2) + (gp.thrUp ? 0.25 : -0.25)); } }
+    hud.fly && hud.fly.sync(sys);
+  }
 
   /* ---------------- spatial guidance: halo, leader-line callout, focus, edge arrow ---------------- */
   const hlTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); x.strokeStyle = '#fff'; x.shadowColor = '#fff'; x.shadowBlur = 12; x.lineWidth = 6; x.beginPath(); x.roundRect(14, 14, 100, 100, 26); x.stroke(); x.shadowBlur = 0; x.lineWidth = 2; x.globalAlpha = 0.5; x.beginPath(); x.roundRect(6, 6, 116, 116, 32); x.stroke(); return new THREE.CanvasTexture(c); })();
@@ -361,23 +473,34 @@ export default function (host) {
   }
 
   /* ---------------- XR ---------------- */
-  const rig = new THREE.Group(); rig.position.copy(EYE); S.scene.add(rig);
+  const rig = new THREE.Group(); rig.position.copy(EYE); cockpit.add(rig);
   const xr = createXR(S, rig, (dt) => frame(dt, true), on => { vrB.textContent = hudVR.textContent = on ? 'Exit VR' : 'Enter VR'; });
   [0, 1].forEach(i => { const c = R.xr.getController(i); rig.add(c); const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(0, 0, 0), V(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0xff8fd0 })); line.scale.z = 1.2; c.add(line);
     c.addEventListener('connected', e => { c.userData.src = e.data; }); c.addEventListener('select', () => { lastXRSource = c.userData.src; const o = c.getWorldPosition(V(0, 0, 0)), d = V(0, 0, -1).applyQuaternion(c.getWorldQuaternion(new THREE.Quaternion())); act(pickRay(o, d)); }); });
   xrSupported().then(ok => { vrB.hidden = hudVR.hidden = !ok; vrNote.hidden = ok; });
 
+  /* ---------------- callouts and messages: on screen, and a synthetic voice when sound is on ---------------- */
+  function say(t) { try { if (!audio.on || !window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.rate = 1.05; u.pitch = 0.9; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) { /* no voice */ } }
+  const MSG = { cleared: ['Tower: cleared to line up runway 27R', 'Line up runway 2 7 right'], pushStart: ['Ground crew: pushing back', ''], pushDone: ['Ground crew: tug disconnected, clear to taxi', ''], pushStopped: ['Ground crew: set parking brake', ''],
+    stopBarRun: ['Stop bar crossed without clearance', ''], tailstrike: ['TAIL STRIKE', ''], apOff: ['AP OFF', ''], pushRefused: ['Beacon on and parking brake off before the push', ''], toConfigOk: ['T.O CONFIG normal', ''] };
+  function onEvent(e) {
+    if (e.type === 'callout') { hud.callout(e.text); say(e.text); haptic(10); }
+    else if (MSG[e.type]) { hud.callout(MSG[e.type][0], e.type === 'stopBarRun' || e.type === 'tailstrike' ? 'W' : ''); if (MSG[e.type][1]) say(MSG[e.type][1]); }
+  }
+
   /* ---------------- main loop ---------------- */
   let roT = 0, clT = 0, warnWas = false;
   function frame(dt, fromXR = false) {
     tAbs += dt;
+    inputs(dt);
     sys.update(dt);
     flow.update();
-    for (const e of sys.events) { audio.event(e); if (e.type === 'warn') haptic(60, 0.9); }
+    for (const e of sys.events) { audio.event(e); if (e.type === 'warn') haptic(60, 0.9); onEvent(e); }
     sys.events.length = 0;
     if (sys.st.master.warn && !warnWas) { try { if (navigator.vibrate && matchMedia('(pointer: coarse)').matches) navigator.vibrate([90, 60, 90]); } catch (e) { /* none */ } }
     warnWas = sys.st.master.warn;
-    deck.update(sys, dt, tAbs); apt.update(sys, dt); audio.update(sys, dt);
+    poseAircraft(); sys.night = todK.night;
+    deck.update(sys, dt, tAbs); apt.update(sys, dt); audio.update(sys, dt); if (ext.root.visible) ext.update(sys, dt, tAbs);
     const E = sys.st.elec;
     const integ = E.dc ? todK.integ : 0; deck.setIntegral(integ, integ * [0, 0.55, 1][sys.sw.intLtOvhd]);
     dome.intensity = E.dc ? [0, 0.7, 1.8][sys.sw.dome] + todK.night * 0.5 : 0; floodL.intensity = E.dc ? todK.night * 2.2 : 0;
@@ -415,7 +538,7 @@ export default function (host) {
     confirm() { return flow.confirm(); },
     advance(sec) { const n = Math.round(sec / (1 / 30)); for (let i = 0; i < n; i++) { sys.update(1 / 30); flow.update(); } sys.events.length = 0; },
     setMode, setScenario, setTOD: k => dSeg.set(k), setView(v, instant) { setView(v, instant); },
-    lookAt(id, fov = 46) { const w = deck.ctlWorld(id); if (w) { const st = { pos: PRESETS[PANEL_VIEW[w.panel] || 'captain'].pos.clone(), fov }; Object.assign(st, dirYP(w.pos.clone().sub(st.pos))); Object.assign(view, st); tween = null; userLookT = tAbs; } },
+    lookAt(id, fov = 46) { const w = deck.ctlWorld(id); if (w) { if (viewName === 'outside') viewName = 'captain'; const st = { pos: PRESETS[PANEL_VIEW[w.panel] || 'captain'].pos.clone(), fov }; Object.assign(st, dirYP(cockpit.worldToLocal(w.pos.clone()).sub(st.pos))); Object.assign(view, st); tween = null; userLookT = tAbs; } },
     pose(p) { if (p.pos) view.pos = p.pos.clone ? p.pos.clone() : V(...p.pos); if (p.fov) view.fov = p.fov; if (p.yaw != null) view.yaw = p.yaw; if (p.pitch != null) view.pitch = p.pitch; if (p.target) Object.assign(view, dirYP(V(...p.target).sub(view.pos))); tween = null; userLookT = tAbs; touchT = 0; touchMark.material.opacity = 0; },
     hero, showMe: () => showMe(0.01), dock: o => hud.toggleDock(o), result() { return flow.result(); }, quality, audio,
     /** type a string on flight computer n (1 or 2): letters, digits, / . - and space */
@@ -423,6 +546,10 @@ export default function (host) {
     /** knob: op 'turn' (n detents), 'push', 'pull' or 'set' (value) */
     knob(id, op, n) { return act({ id }, op === 'turn' ? n : op === 'set' ? { to: n } : op); },
     __drawSD: drawSD,
+    /** continuous flying inputs for tests: { pitch, roll, rudder, tiller, brakeL, brakeR } (cleared by setScenario) */
+    input(o) { Object.assign(drag, { pitch: 0, roll: 0, tiller: 0 }); Object.assign(sys.st.inp, { pitch: 0, roll: 0, rudder: 0, tiller: 0, brakeL: 0, brakeR: 0 }, o); Object.assign(touch, { pitch: o.pitch ?? 0, roll: o.roll ?? 0, tiller: o.tiller ?? 0, brake: Math.max(o.brakeL ?? 0, o.brakeR ?? 0) }); },
+    layout: { toSN, nearest, TAXI_PATH, HOLD, RWY, YAW_RWY },
+    get fdm() { return sys.st.fdm; }, get af() { return sys.st.af; }, setThrust: v => setThr(v), orbit(o) { Object.assign(orbit, o); }, get inputs() { return { kb, drag, touch }; },
     /** compact copy of the avionics and switch state for tests */
     state() { const s = sys.st; return JSON.parse(JSON.stringify({ av: s.av, sdPage: s.sdPage, sw: sys.sw, press: s.press, cond: s.cond, doors: s.doors, brakes: s.brakes, fctl: s.fctl, eng: s.eng.map(e => ({ phase: e.phase, n2: e.n2, sv: e.sv, fuelOn: e.fuelOn, lit: e.lit, running: e.running, man: e.man, fire: e.fire, fault: e.fault })) })); }
   };

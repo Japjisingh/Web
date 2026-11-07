@@ -12,6 +12,7 @@ export function createJetAudio() {
     n.fans = loopNoise('bandpass', 900, 0.4); // avionics ventilation hiss when powered
     n.apuW = osc('sawtooth', 100); n.apuWf = ctx.createBiquadFilter(); n.apuWf.type = 'bandpass'; n.apuWf.Q.value = 6; n.apuW.o.disconnect(); n.apuW.o.connect(n.apuWf); n.apuWf.connect(n.apuW.g);
     n.apuR = loopNoise('lowpass', 300, 0.7);
+    n.rumble = loopNoise('lowpass', 120, 0.9); n.thump = loopNoise('bandpass', 60, 1.2); n.wind = loopNoise('bandpass', 700, 0.5); n.windHi = loopNoise('highpass', 2400, 0.4);
     n.eng = [0, 1].map(() => { const w = osc('sawtooth', 200); const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 9; w.o.disconnect(); w.o.connect(f); f.connect(w.g); const fan = osc('triangle', 60); const r = loopNoise('lowpass', 220, 0.8); const roar = loopNoise('bandpass', 1400, 0.6); return { w, f, fan, r, roar }; });
   }
   function burst(len, vol, f = 3000, type = 'bandpass', q = 1.5, decay = 4) {
@@ -45,6 +46,12 @@ export function createJetAudio() {
       else if (e.type === 'ptu') { for (let i = 0; i < 4; i++) setTimeout(() => { thump(55, 0.09, 0.45); burst(0.06, 0.25, 300, 'lowpass', 1, 2); }, i * 95); }
       else if (e.type === 'agent') { burst(0.6, 0.35, 700, 'lowpass', 0.7, 1.5); thump(60, 0.3, 0.5); }
       else if (e.type === 'gpuOff') thump(120, 0.2, 0.3);
+      else if (e.type === 'gearUp' || e.type === 'gearDown') { thump(70, 0.35, 0.7); burst(0.12, 0.4, 400, 'lowpass', 1, 3); }
+      else if (e.type === 'gearMoving') { burst(0.8, 0.12, 300, 'lowpass', 0.7, 0.8); }
+      else if (e.type === 'liftoff') burst(0.3, 0.2, 200, 'lowpass', 1, 2);
+      else if (e.type === 'touchdown') { thump(55, 0.4, 0.8); burst(0.3, 0.5, 900, 'bandpass', 1, 3); }
+      else if (e.type === 'pushStart' || e.type === 'pushDone') thump(90, 0.25, 0.4);
+      else if (e.type === 'rto') { thump(60, 0.3, 0.5); }
     },
     update(sys, dt) {
       if (!on) return; const t = ctx.currentTime, s = sys.st, k = 0.15;
@@ -59,6 +66,11 @@ export function createJetAudio() {
         E.r.g.gain.setTargetAtTime(e.lit ? 0.08 + n1 * 0.2 : n2 * 0.05, t, 0.4); E.roar.g.gain.setTargetAtTime(e.lit ? 0.01 + n1 * 0.06 : 0, t, 0.4);
         if (e.ign) { ignT[i] -= dt; if (ignT[i] <= 0) { ignT[i] = 0.55; burst(0.004, 0.5, 6000, 'highpass', 1, 10); } }
       });
+      // airframe: runway rumble and joints, wind noise growing with airspeed
+      const F = s.fdm, gs = F && F.onGround ? F.gs : 0, ias = F ? F.ias : 0;
+      n.rumble.g.gain.setTargetAtTime(Math.min(0.35, gs / 140 * 0.35), t, 0.2); n.rumble.fl.frequency.setTargetAtTime(70 + gs * 1.3, t, 0.3);
+      n.thump.g.gain.setTargetAtTime(gs > 2 ? (Math.sin(t * gs * 0.21) > 0.97 ? 0.4 : 0.02) * Math.min(1, gs / 40) : 0, t, 0.02);
+      const wk = Math.min(1, Math.max(0, ias - 40) / 220); n.wind.g.gain.setTargetAtTime(wk * wk * 0.22 * (1 + (F && F.gear > 0.5 && !F.onGround ? 0.4 : 0)), t, 0.4); n.wind.fl.frequency.setTargetAtTime(400 + ias * 4, t, 0.5); n.windHi.g.gain.setTargetAtTime(wk * wk * 0.05, t, 0.4);
       // repetitive chime for warnings
       if (s.master.crc) { crcT -= dt; if (crcT <= 0) { crcT = 0.62; ding([[660, 1], [1320, 0.3], [990, 0.2]], 0.5, 0.2); } } else crcT = 0;
     }

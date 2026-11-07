@@ -6,7 +6,10 @@
 import { CTL, fmsId } from './controls.js';
 import { fmsStatus, fmsNext } from './avionics.js';
 
-export const PHASES = { power: 'Power-up', scan: 'Overhead scan', apu: 'APU start', fms: 'Flight computer', before: 'Before start', start: 'Engine start', man: 'Manual start', after: 'After start', fire: 'Engine fire drill' };
+export const PHASES = { power: 'Power-up', scan: 'Overhead scan', apu: 'APU start', fms: 'Flight computer', before: 'Before start', start: 'Engine start', man: 'Manual start', after: 'After start', fire: 'Engine fire drill',
+  push: 'Pushback', btaxi: 'Before taxi', taxi: 'Taxi', lineup: 'Line-up', to: 'Take-off', ato: 'After take-off', rto: 'Rejected take-off' };
+const lv = (s, id) => s.sw[id];
+const both = (s, v) => Math.abs(s.sw.thr1 - v) < 0.07 && Math.abs(s.sw.thr2 - v) < 0.07;
 const FMS_KEYS = Object.keys(CTL).filter(id => CTL[id].k === 'key');
 
 const all = (...ids) => s => ids.every(id => s.sw[id]);
@@ -73,6 +76,41 @@ export const STEPS = {
   man2lit: { ph: 'man', kind: 'wait', t: 'ENG 2 — light-off, EGT and N1 rising (abort if the EGT runs away)', where: 'Upper display', look: 'ewd', done: s => (s.st.eng[1].lit && s.st.eng[1].n1 > 4) || s.st.eng[1].running },
   man2idle: { ph: 'man', kind: 'wait', t: 'ENG 2 — start valve closed, stable at idle', where: 'Upper display', look: 'ewd', done: s => s.st.eng[1].running },
   man2off: { ph: 'man', kind: 'set', t: 'ENG 2 MAN START — OFF', where: 'Overhead · right column', ctl: ['manStart2'], done: s => !s.sw.manStart2 },
+  // ---------- pushback, before taxi, taxi, line-up, take-off, after take-off ----------
+  parkOffPush: { ph: 'push', kind: 'set', t: 'PARKING BRAKE — OFF (tug connected)', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => !s.sw.parkBrk, tip: 'Turn the handle to OFF. The tug holds the aircraft.' },
+  callPush: { ph: 'push', kind: 'set', t: 'Call for pushback', where: 'Push button in the overlay (key P)', ctl: ['push'], done: s => !!s.st.fdm.push, tip: 'The tug pushes you back and turns you onto the taxi line.' },
+  pushWait: { ph: 'push', kind: 'wait', t: 'Pushback — wait until the tug has disconnected', where: 'Outside view shows the tug', look: 'nd', done: s => !!(s.st.fdm.push && s.st.fdm.push.gone) },
+  parkSetPush: { ph: 'push', kind: 'set', t: 'PARKING BRAKE — SET', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => s.sw.parkBrk },
+  flapsTO: { ph: 'btaxi', kind: 'set', t: 'FLAPS — 1 (take-off setting)', where: 'Pedestal · FLAPS', ctl: ['flaps'], done: s => s.sw.flaps === 1 },
+  spoilersArm: { ph: 'btaxi', kind: 'set', t: 'GROUND SPOILERS — ARM', where: 'Pedestal · SPEED BRAKE lever', ctl: ['spdBrk'], done: s => s.sw.spdBrk === 1 },
+  abMax: { ph: 'btaxi', kind: 'set', t: 'AUTO BRK — MAX (rejected take-off protection)', where: 'Main panel · AUTO BRK', ctl: ['autoBrkMax'], done: s => s.sw.autoBrk === 3 },
+  fctlChk: { ph: 'btaxi', kind: 'wait', t: 'Flight controls — CHECK: full aft, full forward, full left, full right', where: 'Captain sidestick · lower display F/CTL page', look: 'stickL', done: s => !!s.st.fctl.checked, tip: 'Drag the stick (or W/S/A/D, a gamepad, the on-screen stick) to each stop and watch the surfaces on the F/CTL page.' },
+  toConfig: { ph: 'btaxi', kind: 'set', t: 'T.O CONFIG — TEST: no caution', where: 'Pedestal · T.O CONFIG', ctl: ['toConfig'], done: s => s.st.toCfg.tested && !s.st.toCfg.faults.length, tip: 'Checks flaps, speed brake and brake temperature. A caution names anything that is wrong.' },
+  parkOffTaxi: { ph: 'taxi', kind: 'set', t: 'PARKING BRAKE — OFF', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => !s.sw.parkBrk },
+  taxiHold: { ph: 'taxi', kind: 'wait', t: 'Taxi to the holding point: follow the green line below 30 kt, stop before the red stop bar', where: 'Thrust a little above idle, tiller to steer, brakes to slow', look: 'nd', done: s => s.st.mon.atHold && s.st.mon.held > 0.5 },
+  holdShort: { ph: 'taxi', kind: 'wait', t: 'Hold short — the stop bar goes out when you are cleared to line up', where: 'Holding point', look: 'nd', done: s => s.st.mon.cleared },
+  lineLights: { ph: 'lineup', kind: 'set', t: 'Exterior lights — STROBE ON, LAND ON, NOSE T.O', where: 'Overhead · EXT LT', ctl: ['strobe', 'landL', 'landR', 'nose'], want: { strobe: 2, landL: 2, landR: 2, nose: 2 }, done: s => s.sw.strobe === 2 && s.sw.landL === 2 && s.sw.landR === 2 && s.sw.nose === 2 },
+  xpdrOn: { ph: 'lineup', kind: 'set', t: 'Transponder — ON', where: 'Pedestal · ATC', ctl: ['xpdr'], done: s => s.sw.xpdr === 2 },
+  lineUp: { ph: 'lineup', kind: 'wait', t: 'Line up on the runway centre line and stop', where: 'Runway 27R', look: 'pfd', done: s => s.st.mon.lined && s.st.fdm.gs < 3 },
+  chrono: { ph: 'lineup', kind: 'set', t: 'Timing — CHRONO start', where: 'Main panel · CHRONO', ctl: ['chrono'], done: s => s.st.chronoT >= 0 },
+  thrustSet: { ph: 'to', kind: 'set', t: 'THRUST LEVERS — FLX (or TOGA); brakes released', where: 'Pedestal · thrust levers (PageUp, or drag)', ctl: ['thr1', 'thr2'], want: { thr1: 2, thr2: 2 }, done: s => s.sw.thr1 >= 1.94 && s.sw.thr2 >= 1.94, tip: 'Check the FMA: MAN FLX | SRS | RWY. Keep the centre line with the rudder (Q / E).' },
+  c100: { ph: 'to', kind: 'wait', t: '“100 knots” — check speed and engines', where: 'PFD speed tape', look: 'pfd', done: s => !!s.st.callouts['100'] },
+  cV1: { ph: 'to', kind: 'wait', t: '“V1” — continue the take-off', where: 'PFD speed tape', look: 'pfd', done: s => !!s.st.callouts.v1 },
+  rotate: { ph: 'to', kind: 'wait', t: '“Rotate” — pull smoothly to about 15° nose up (about 3°/s)', where: 'Sidestick: drag back, S key or the on-screen stick', look: 'pfd', done: s => !s.st.fdm.onGround },
+  posClimb: { ph: 'to', kind: 'wait', t: '“Positive climb”', where: 'PFD: altitude and vertical speed rising', look: 'pfd', done: s => !!s.st.callouts.pos },
+  gearUp: { ph: 'to', kind: 'set', t: 'GEAR — UP', where: 'Main panel · gear lever (G)', ctl: ['gear'], done: s => s.sw.gearLever === 'UP' },
+  ap1On: { ph: 'ato', kind: 'set', t: 'AP 1 — ON (above 100 ft)', where: 'Glareshield · FCU', ctl: ['ap1'], done: s => s.sw.ap1 || s.sw.ap2 },
+  thrCL: { ph: 'ato', kind: 'set', t: 'THRUST LEVERS — CL at LVR CLB', where: 'Pedestal · thrust levers', ctl: ['thr1', 'thr2'], want: { thr1: 1, thr2: 1 }, done: s => both(s, 1) && !s.st.fdm.onGround, tip: 'At about 1500 ft the FMA flashes LVR CLB. In CL the autothrust takes over: THR CLB.' },
+  flapsUp: { ph: 'ato', kind: 'set', t: 'FLAPS — 0 at the S speed', where: 'Pedestal · FLAPS', ctl: ['flaps'], done: s => s.sw.flaps === 0, tip: 'Retract when the speed passes the green S on the speed tape.' },
+  levelOff: { ph: 'ato', kind: 'wait', t: 'Level off at 5000 ft (FMA: ALT)', where: 'PFD and FCU altitude', look: 'pfd', done: s => s.st.af.vert === 'ALT' && Math.abs(s.st.fdm.alt - s.st.av.fcu.alt) < 120 },
+  // ---------- rejected take-off ----------
+  rtoThrust: { ph: 'rto', kind: 'set', t: 'THRUST LEVERS — FLX', where: 'Pedestal · thrust levers', ctl: ['thr1', 'thr2'], want: { thr1: 2, thr2: 2 }, done: s => s.sw.thr1 >= 1.94 && s.sw.thr2 >= 1.94 },
+  rtoMon: { ph: 'rto', kind: 'wait', t: 'Monitor the take-off roll: speed, engines, alerts', where: 'PFD and upper display', look: 'ewd', done: s => !!(s.st.rtoInject && s.st.rtoInject.fired) },
+  rtoIdle: { ph: 'rto', kind: 'set', t: 'STOP — thrust levers IDLE', where: 'Pedestal · thrust levers (Home)', ctl: ['thr1', 'thr2'], want: { thr1: 0, thr2: 0 }, done: s => s.sw.thr1 < 0.05 && s.sw.thr2 < 0.05, tip: 'Before V1 a warning means reject. Idle; the autobrake (MAX) brakes fully, ground spoilers extend.' },
+  rtoBrake: { ph: 'rto', kind: 'wait', t: 'Check DECEL (autobrake RTO); brake fully by hand if not', where: 'Main panel · AUTO BRK DECEL light', look: 'pfd', done: s => s.st.fdm.abActive || s.st.fdm.gs < 2 || s.st.fdm.decel > 3 },
+  rtoStop: { ph: 'rto', kind: 'wait', t: 'Stop straight on the runway', where: 'Runway', look: 'pfd', done: s => s.st.fdm.gs < 0.5 },
+  rtoPark: { ph: 'rto', kind: 'set', t: 'PARKING BRAKE — SET', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => s.sw.parkBrk },
+  rtoInform: { ph: 'rto', kind: 'confirm', t: 'Tell ATC and the cabin crew: stopped on the runway', where: 'Press Done' },
   // ---------- engine fire during start ----------
   e2mon: { ph: 'start', kind: 'wait', t: 'ENG 2 — monitor: light-off, EGT and N1 rising', where: 'Upper display', look: 'ewd', done: s => s.st.eng[1].fire || s.st.eng[1].running },
   mwSil: { ph: 'fire', kind: 'set', t: 'MASTER WARNING — press to silence; read ENG 2 FIRE', where: 'Glareshield', ctl: ['masterWarnL', 'masterWarnR'], any: true, done: s => s.st.ackFire },
@@ -93,6 +131,8 @@ export const STEPS = {
 
 const PREP = ['batv', 'bat1', 'bat2', 'ext', 'irs', 'crewOxy', 'fireTest', 'hydChk', 'fuelPumps', 'elecChk', 'airChk', 'antiIce', 'press', 'navLt', 'belts', 'noSmk', 'emerExit', 'annTest', 'rightCol', 'apuMaster', 'apuStart', 'apuAvail', 'apuBleed', 'extOff', 'fms', 'irsAligned'];
 const BEFORE = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart'];
+const TAXI_TO = ['parkOffPush', 'callPush', 'pushWait', 'parkSetPush', 'flapsTO', 'spoilersArm', 'abMax', 'fctlChk', 'toConfig', 'parkOffTaxi', 'taxiHold', 'holdShort', 'lineLights', 'xpdrOn', 'lineUp', 'chrono',
+  'thrustSet', 'c100', 'cV1', 'rotate', 'posClimb', 'gearUp', 'ap1On', 'thrCL', 'flapsUp', 'levelOff'];
 const FIRE_A = [...BEFORE, 'm2on', 'e2ign', 'e2mon', 'mwSil', 'thr2Idle', 'm2off', 'fire2pb', 'wait10', 'agent1'];
 const START = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart', 'm2on', 'e2ign', 'e2lit', 'e2idle', 'm1on', 'e1start', 'e1idle', 'modeNorm', 'apuBleedOff', 'packsOn', 'apuOff', 'sdCheck', 'flaps'];
 export const SCENARIOS = {
@@ -101,11 +141,36 @@ export const SCENARIOS = {
   full: { title: 'Cold & dark to engines running', init: 'cold', steps: [...PREP, ...START] },
   fire: { title: 'Engine fire during start', init: 'beforeStart', fire: { eng: 1, n2: 36 }, steps: [...FIRE_A, 'fireOut', 'modeNormF', 'inform'] },
   fire2: { title: 'Engine fire: second bottle', init: 'beforeStart', fire: { eng: 1, n2: 36, persist: true }, steps: [...FIRE_A, 'fireStill', 'agent2', 'fireOut2', 'modeNormF', 'inform'] },
-  manual: { title: 'Manual engine start', init: 'beforeStart', steps: [...BEFORE, 'man2on', 'man2n2', 'man2master', 'man2lit', 'man2idle', 'man2off', 'modeNorm', 'apuBleedOff', 'packsOn'] }
+  manual: { title: 'Manual engine start', init: 'beforeStart', steps: [...BEFORE, 'man2on', 'man2n2', 'man2master', 'man2lit', 'man2idle', 'man2off', 'modeNorm', 'apuBleedOff', 'packsOn'] },
+  taxi: { title: 'Taxi and take-off', init: 'stand', moving: true, steps: TAXI_TO, judge: judgeDeparture },
+  departure: { title: 'Full departure', init: 'cold', moving: true, steps: [...PREP, ...START.filter(id => id !== 'flaps'), ...TAXI_TO], judge: judgeDeparture },
+  rto: { title: 'Rejected take-off', init: 'lineup', moving: true, rto: { ias: 95 }, steps: ['rtoThrust', 'rtoMon', 'rtoIdle', 'rtoBrake', 'rtoStop', 'rtoPark', 'rtoInform'], judge: judgeRTO }
 };
+/* scoring of the flying itself (debrief “Timing and handling” notes, with penalties) */
+function judgeDeparture(sys) {
+  const M = sys.st.mon, o = [], r = x => Math.round(x * 10) / 10;
+  if (M.taxiMax > 0) o.push(M.taxiOverT > 1.5 ? { text: `Taxi speed above 30 kt for ${Math.round(M.taxiOverT)} s (max ${Math.round(M.taxiMax)} kt)`, pen: Math.min(10, 3 + Math.round(M.taxiOverT / 5)) } : { text: `Taxi speed kept below 30 kt (max ${Math.round(M.taxiMax)} kt) — good.` });
+  if (M.stopBarRun) o.push({ text: 'Ran the red stop bar at the holding point', pen: 20 });
+  if (M.toCl.n > 20) { const rms = Math.sqrt(M.toCl.sum / M.toCl.n); o.push(M.toCl.max > 6 ? { text: `Take-off roll: centre-line deviation up to ${r(M.toCl.max)} m (RMS ${r(rms)} m)`, pen: Math.min(10, Math.round(M.toCl.max - 5)) } : { text: `Take-off roll on the centre line: max ${r(M.toCl.max)} m — good.` }); }
+  if (M.liftoff) { const L = M.liftoff; o.push({ text: `Rotation about ${r(L.rate)}°/s, lift-off at ${Math.round(L.ias)} kt and ${r(L.pitch)}° pitch` + (L.rate > 4.5 ? ' — too fast' : L.rate < 1.8 ? ' — too slow' : ' — good'), pen: L.rate > 4.5 || L.rate < 1.8 ? 5 : 0 }); }
+  if (sys.st.fdm.tailstrike) o.push({ text: 'Tail strike on rotation (pitch above about 11.5° on the ground)', pen: 20 });
+  if (M.maxPitch > 22) o.push({ text: `Pitch up to ${r(M.maxPitch)}° after lift-off (aim for about 15°)`, pen: 3 });
+  if (M.flapOver > 0) o.push({ text: `Flap speed limit exceeded by ${Math.round(M.flapOver)} kt`, pen: 10 });
+  if (M.gearOver > 0) o.push({ text: `Gear speed limit exceeded by ${Math.round(M.gearOver)} kt`, pen: 10 });
+  return o;
+}
+function judgeRTO(sys) {
+  const M = sys.st.mon, o = [];
+  if (M.reject) o.push(M.reject.ias <= M.reject.v1 ? { text: `Rejected at ${Math.round(M.reject.ias)} kt, ${M.reject.dt.toFixed(1)} s after the warning (V1 ${M.reject.v1}) — good decision.` } : { text: `Rejected at ${Math.round(M.reject.ias)} kt, above V1 (${M.reject.v1}): after V1 continue the take-off`, pen: 25 });
+  if (M.stopRemain) o.push(M.stopRemain.on ? { text: `Stopped on the runway with ${Math.round(M.stopRemain.s)} m remaining.` } : { text: 'Left the runway while stopping', pen: 20 });
+  if (M.toCl.n > 20 && M.toCl.max > 6) o.push({ text: `Centre-line deviation up to ${Math.round(M.toCl.max)} m`, pen: 5 });
+  return o;
+}
 // controls that never count as wrong (silencing, display pages, lighting)
 export const FREE = new Set(['masterWarn', 'masterCaut', 'masterWarnL', 'masterWarnR', 'masterCautL', 'masterCautR', 'sdENG', 'sdBLEED', 'sdPRESS', 'sdELEC', 'sdHYD', 'sdFUEL', 'sdAPU', 'sdCOND', 'sdDOOR', 'sdWHEEL', 'sdFCTL', 'sdSTS', 'dome', 'intLtOvhd', 'sd', 'ewd', 'pfd', 'nd', 'stby', 'clock', 'brakeGauge', 'batV1', 'batV2']);
 
+// continuous flying controls: never wrong while the aircraft moves
+const MOVING_FREE = new Set(['thr1', 'thr2', 'parkBrk', 'gear', 'flaps', 'spdBrk', 'stickL', 'tiller', 'toConfig', 'chrono', 'push', 'autoBrkMax', 'autoBrkLo', 'autoBrkMed', 'sdFCTL', 'nose', 'landL', 'landR', 'strobe', 'rwyTurn', 'xpdr']);
 export function createFlow(sys, key, mode = 'guided') {
   const sc = SCENARIOS[key];
   const F = { key, title: sc.title, mode, steps: sc.steps.map((id, i) => ({ id, i, ...STEPS[id], state: 'pending', touch: false, at: -1, order: -1 })), cur: 0, errors: [], t0: sys.t, tEnd: -1, finished: false, seq: 0, last: null };
@@ -163,7 +228,7 @@ export function createFlow(sys, key, mode = 'guided') {
       q.engaged = true;
       return fb('partial', q, 'Out of order: that control belongs to step ' + (j + 1));
     }
-    if (FREE.has(ctl) || (CTL[ctl] && CTL[ctl].free)) return null;
+    if (FREE.has(ctl) || (CTL[ctl] && CTL[ctl].free) || (sc.moving && MOVING_FREE.has(ctl))) return null;
     F.errors.push({ ctl, atStep: F.cur, atText: s ? s.t : '', t: sys.t });
     return fb('wrong', s, s ? `Not part of this step. Next: ${s.t}` : 'Not expected now');
   };
@@ -173,9 +238,11 @@ export function createFlow(sys, key, mode = 'guided') {
     const counted = F.steps.filter(s => s.state !== 'na');
     const inOrder = counted.filter(s => s.state === 'done').length, late = counted.filter(s => s.state === 'late').length, missed = counted.filter(s => s.state === 'missed');
     const wrong = F.errors.length;
-    const pen = F.steps.reduce((t, s) => t + (s.penalty ? s.penalty(sys) : 0), 0);
+    const J = sc.judge && F.steps.some(s => s.state === 'done' || s.state === 'late') ? sc.judge(sys) : [];
+    const pen = F.steps.reduce((t, s) => t + (s.penalty ? s.penalty(sys) : 0), 0) + J.reduce((t, j) => t + (j.pen || 0), 0);
     const score = Math.max(0, Math.round(100 * (inOrder + 0.5 * late) / Math.max(1, counted.length)) - Math.min(20, wrong * 2) - pen);
     const notes = F.steps.filter(s => s.note).map(s => s.note(sys)).filter(Boolean);
+    for (const j of J) notes.push(j.text + (j.pen ? ` (−${j.pen})` : ''));
     return { score, total: counted.length, inOrder, late: counted.filter(s => s.state === 'late'), missed, wrong: F.errors, notes, time: (F.tEnd >= 0 ? F.tEnd : sys.t) - F.t0 };
   };
   F.progress = () => { const c = F.steps.filter(s => s.state === 'done' || s.state === 'late').length; return { done: c, total: F.steps.filter(s => s.state !== 'na').length }; };

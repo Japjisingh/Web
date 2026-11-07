@@ -111,7 +111,7 @@ export function buildDeck(renderer) {
     P.knob(mir(0.06), 0.29, 0.009); P.text('LOUDSPEAKER', mir(0.06), 0.272, 0.0036);
     P.tog(sd < 0 ? 'd_consoleL' : 'd_consoleR', mir(0.16), 0.30, { labels: ['OFF', 'DIM', 'BRT'], label: 'CONSOLE/FLOOR' });
     P.pb(sd < 0 ? 'd_pfdxfr' : 'd_pfdxfrR', mir(0.39), 0.28, { top: 'PFD/ND', topC: Wh, single: true, paint: true, label: 'XFR', size: 0.28 });
-    P.pb(sd < 0 ? 'd_chrono' : 'd_chronoR', mir(0.60), 0.27, { top: 'CHRONO', topC: Wh, single: true, paint: true, size: 0.26 });
+    P.pb(sd < 0 ? 'chrono' : 'd_chronoR', mir(0.60), 0.27, { top: 'CHRONO', topC: Wh, single: true, paint: true, size: 0.26 });
     P.knob(mir(0.30), 0.27, 0.008); P.text('PFD', mir(0.30), 0.254, 0.0036); P.knob(mir(0.49), 0.27, 0.008); P.text('ND', mir(0.49), 0.254, 0.0036);
     P.text('INTEGRAL BRIGHTNESS', mir(0.40), 0.315, 0.0036, { color: '#cfd6da' });
     P.group.position.set(sd * secW / 2, 0, 0);
@@ -132,14 +132,14 @@ export function buildDeck(renderer) {
     P.text('LDG GEAR', 0.465, 0.026, 0.0042, { weight: 700 });
     [['gearL', 0.432], ['gearN', 0.465], ['gearR', 0.498]].forEach(([id, u]) => P.ann(id, u, 0.046, { top: 'DN', topC: G, single: true, w: 0.022, h: 0.014 }));
     P.text('AUTO BRK', 0.465, 0.07, 0.0042, { weight: 700 });
-    ['LO', 'MED', 'MAX'].forEach((t, i) => P.pb('autoBrk', 0.432 + i * 0.033, 0.09, { top: t, topC: Wh, bot: '', botC: G, paint: true, w: 0.022, h: 0.016, d: 0.008, bar: true, topSize: 0.42 }));
+    ['LO', 'MED', 'MAX'].forEach((t, i) => { P.pb('autoBrk' + ['Lo', 'Med', 'Max'][i], 0.432 + i * 0.033, 0.094, { top: 'DECEL', topC: G, bot: 'ON', botC: Bl, w: 0.022, h: 0.016, d: 0.008, topSize: 0.34, botSize: 0.36 }); P.text(t, 0.432 + i * 0.033, 0.081, 0.0032, { weight: 700 }); });
     { // gear lever: slot + lever with wheel-shaped knob (down)
       const p = P.local(0.465, 0.20);
       P.draw((x, px) => { x.fillStyle = '#15191c'; x.beginPath(); x.roundRect(px(0.459), px(0.135), px(0.012), px(0.13), px(0.006)); x.fill(); x.fillStyle = '#f2f4f5'; x.font = `700 ${px(0.0042)}px ${FONT}`; x.textAlign = 'left'; x.fillText('UP', px(0.478), px(0.14)); x.fillText('DOWN', px(0.478), px(0.262)); });
       const g = new THREE.Group(); g.position.set(p.x, p.y - 0.055, 0); P.group.add(g);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.01, 0.07), M.metal); arm.position.z = 0.035; g.add(arm);
       const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.016, 28), M.white); wheel.rotation.z = Math.PI / 2; wheel.position.z = 0.075; g.add(wheel);
-      P.custom('gear', g, 'deco', { u: 0.465, v: 0.255, size: 0.05 });
+      P.custom('gear', g, 'gearlever', { u: 0.465, v: 0.255, size: 0.05, y0: g.position.y });
     }
     // brake & accumulator triple gauge (mechanical)
     { const p = P.local(0.465, 0.355); P.static(new THREE.CylinderGeometry(0.044, 0.046, 0.022, 40), M.bezel, V(p.x, p.y, 0.006), [Math.PI / 2, 0, 0]);
@@ -356,7 +356,7 @@ export function buildDeck(renderer) {
     }
     P.module('PAGES', 'SYSTEM PAGES', 0.004, 0.256, 0.416, 0.341, { titleAlign: 'center' });
     ['ENG', 'BLEED', 'PRESS', 'ELEC', 'HYD', 'FUEL', 'APU', 'COND', 'DOOR', 'WHEEL', 'F/CTL', 'STS'].forEach((t, i) => P.pb('sd' + t.replace('/', ''), 0.10 + (i % 6) * 0.044, 0.288 + Math.floor(i / 6) * 0.03, { top: t, topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, d: 0.008, size: 0.34 }));
-    P.pb('d_toconf', 0.042, 0.288, { top: 'T.O\nCONFIG', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.28 }); P.pb('d_emercanc', 0.042, 0.318, { top: 'EMER\nCANC', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.28 });
+    P.pb('toConfig', 0.042, 0.288, { top: 'T.O\nCONFIG', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.28 }); P.pb('d_emercanc', 0.042, 0.318, { top: 'EMER\nCANC', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.28 });
     P.pb('d_clr', 0.378, 0.288, { top: 'CLR', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.34 }); P.pb('d_rcl', 0.378, 0.318, { top: 'RCL', topC: Wh, single: true, paint: true, w: 0.032, h: 0.019, size: 0.34 });
     const g = P.group; g.position.set(0, 0.492, -0.615); g.rotation.x = (-90 + 15) * D2R; addPanel(P, ped);
   }
@@ -460,6 +460,7 @@ export function buildDeck(renderer) {
     const hb = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.17, 0.07), new THREE.MeshBasicMaterial({ visible: false })); hb.position.set(0, 0.08, 0); K.piv.add(hb);
     for (const m of [K.grip, K.btn, hb]) { m.userData.ctl = 'stickL'; hits.push(m); }
     ctls.stickL = { id: 'stickL', kind: 'stick', panel: stub, obj: K.btn, piv: K.piv, size: 0.07, a: null };
+    if (SH.tillerL) { const T = SH.tillerL; const hb2 = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 12), new THREE.MeshBasicMaterial({ visible: false })); hb2.rotation.x = Math.PI / 2; T.piv.add(hb2); for (const m of [T.wheel, T.knob, hb2]) { m.userData.ctl = 'tiller'; hits.push(m); } ctls.tiller = { id: 'tiller', kind: 'tiller', panel: stub, obj: T.piv, piv: T.piv, size: 0.12 }; }
   }
 
   /* ---- merge the shell ---- */
@@ -496,13 +497,17 @@ export function buildDeck(renderer) {
         const a = (av.turns[c.knob] || 0) * C.step * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * Math.min(1, k * 1.6); C.obj.rotation.z = -C.a;
         const kk = av.kick[c.knob], dtk = kk ? sys.t - kk.t : 9; C.obj.position.z = C.z0 + (kk && dtk >= 0 && dtk < 0.3 ? kk.dir * 0.003 * Math.sin(Math.PI * dtk / 0.3) : 0); continue;
       }
-      if (C.kind === 'stick') { const v = sys.sw.stickL, tx = v === 'AFT' ? 0.3 : v === 'FWD' ? -0.24 : 0, tz = v === 'LEFT' ? 0.32 : v === 'RIGHT' ? -0.32 : 0; C.piv.rotation.x += (tx - C.piv.rotation.x) * k; C.piv.rotation.z += (tz - C.piv.rotation.z) * k; continue; }
+      if (C.kind === 'stick') { const st = sys.stick(), tx = st.pitch > 0 ? st.pitch * 0.3 : st.pitch * 0.24, tz = -st.roll * 0.32; C.piv.rotation.x += (tx - C.piv.rotation.x) * k; C.piv.rotation.z += (tz - C.piv.rotation.z) * k; continue; }
+      if (C.kind === 'tiller') { C.piv.rotation.y += (-(sys.st.inp.tiller || 0) * 1.4 - C.piv.rotation.y) * k; continue; }
+      if (C.kind === 'gearlever') { const up = sys.sw.gearLever === 'UP' ? 0.105 : 0; C.obj.position.y += (C.y0 + up - C.obj.position.y) * k; C.obj.position.z = up > 0 ? 0.006 : 0; continue; }
       if (!c || !c.sw) continue;
       const v = sys.sw[c.sw];
       if (C.kind === 'tog') { const i = c.pos.indexOf(v); const a = C.ang[Math.max(0, i)] * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * k; C.piv.rotation.x = -C.a; }
       else if (C.kind === 'rot') { const i = c.pos.indexOf(v); const a = C.ang[Math.max(0, i)] * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * k; C.piv.rotation.z = -C.a; }
       else if (C.kind === 'lever' || C.kind === 'master') {
-        const i = c.k === 'master' ? (v ? 1 : 0) : c.pos.indexOf(v); const a = C.ang[Math.min(C.ang.length - 1, Math.max(0, i))] * D2R;
+        let i = c.k === 'master' ? (v ? 1 : 0) : c.pos.indexOf(v); let a;
+        if (i < 0 && typeof v === 'number') { const i0 = Math.max(0, Math.min(C.ang.length - 2, Math.floor(v))), f = Math.min(1, v - i0); a = (C.ang[i0] + (C.ang[i0 + 1] - C.ang[i0]) * f) * D2R; i = Math.round(v); }
+        else a = C.ang[Math.min(C.ang.length - 1, Math.max(0, i))] * D2R;
         const lift = Array.isArray(C.lift) ? C.lift[i] || 0 : 0;
         if (C.a == null) { C.a = a; C.l = lift; }
         const moving = Math.abs(a - C.a) > 0.01; C.a += (a - C.a) * k * 0.8; C.l = (C.l || 0) + ((c.k === 'master' && moving ? 0.008 : lift) - (C.l || 0)) * k;

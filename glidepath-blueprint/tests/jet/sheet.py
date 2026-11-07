@@ -20,17 +20,21 @@ if SET == 'avionics':
     names = [('g-fcu-selected-values', 'G · FCU: SPD 160, HDG 279, ALT 12000, V/S +1500, AP 1'), ('h-efis-pfd-bugs-baro-fd', 'H · EFIS + PFD: bugs, QNH 1009, FD, LS, V-speeds'),
              ('i-nd-arc-40-constraints', 'I · ND: ARC, 40 NM, CSTR overlay, VOR 1 pointer'), ('j-flight-computers-init-perf', 'J · Flight computers: INIT (1) and PERF (2)'),
              ('k-radio-transponder', 'K · Radio panels and transponder'), ('l-systems-pages-grid', 'L · Systems pages: PRESS, COND, DOOR, WHEEL, F/CTL, STATUS'), ('m-fire-agent2-callout', 'M · Fire drill: AGENT 2 after ~30 s (guided)')]
+if SET == 'taxi':
+    names = [('n1-pushback-tug', 'N1 · Pushback with the tug (Outside view)'), ('n2-taxi-guided', 'N2 · Taxi on the green line, guided'), ('n3-lineup-dusk-runway-lights', 'N3 · Line-up at dusk: runway lights'),
+             ('n4-takeoff-roll-120kt', 'N4 · Take-off roll at about 120 kt'), ('n5-rotation-outside', 'N5 · Rotation from outside'), ('n6-climb-2000ft-ap-fma', 'N6 · Climb-out, 2000 ft, AP 1 and FMA'),
+             ('n7-rto-stopping', 'N7 · Rejected take-off: stopping'), ('n8-debrief-rto', 'N8 · Debrief with handling notes')]
 W, H, cols = 640, 400, 3
 rows = (len(names) + cols - 1) // cols
 sheet = Image.new('RGB', (W * cols, (H + 34) * rows + 50), (12, 18, 24))
 dr = ImageDraw.Draw(sheet)
 try: f = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 17); fb = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 22)
 except Exception: f = fb = ImageFont.load_default()
-dr.text((16, 13), ('Jet trainer · working avionics (1920×1200, dusk, Ultra)' if SET == 'avionics' else 'Jet trainer · captain-view premium pass (1920×1200, supersampled)' if SET == 'captain' else 'Jet procedure trainer · hero renders (1920×1200, supersampled) · generic twin-jet, our own flows and wording'), fill=(230, 238, 241), font=fb)
+dr.text((16, 13), ('Jet trainer · taxi and take-off (1920×1200, Ultra)' if SET == 'taxi' else 'Jet trainer · working avionics (1920×1200, dusk, Ultra)' if SET == 'avionics' else 'Jet trainer · captain-view premium pass (1920×1200, supersampled)' if SET == 'captain' else 'Jet procedure trainer · hero renders (1920×1200, supersampled) · generic twin-jet, our own flows and wording'), fill=(230, 238, 241), font=fb)
 for i, (n, label) in enumerate(names):
     p = os.path.join(D, n + '.png')
     if not os.path.exists(p): continue
     im = Image.open(p).convert('RGB').resize((W, H), Image.LANCZOS)
     x, y = (i % cols) * W, 50 + (i // cols) * (H + 34)
     sheet.paste(im, (x, y)); dr.text((x + 10, y + H + 7), label, fill=(200, 214, 220), font=f)
-sheet.save(os.path.join(D, {'captain': '00-captain-contact-sheet.png', 'avionics': '00-avionics-contact-sheet.png'}.get(SET, '00-contact-sheet.png'))); print('sheet saved', sheet.size)
+sheet.save(os.path.join(D, {'captain': '00-captain-contact-sheet.png', 'avionics': '00-avionics-contact-sheet.png', 'taxi': '00-taxi-takeoff-contact-sheet.png'}.get(SET, '00-contact-sheet.png'))); print('sheet saved', sheet.size)

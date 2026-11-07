@@ -3,6 +3,9 @@
    Every figure is approximate and generic: written from general public knowledge, not any manufacturer's data. */
 
 import { createAvionics, presetAvionics, avUpdate, fcuRule, FIELD_ELEV } from './avionics.js';
+import { createFDM, thrustOf, AF, KT, FT } from './fdm.js';
+import { createAutoflight, autoflight, leverN1 } from './autoflight.js';
+import { toSN, RWY, HOLD, TAXI_PATH, nearest, ELEV_FT, WIND } from './layout.js';
 
 export const DT = 1 / 30;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -41,7 +44,8 @@ export function coldSwitches() {
     fdL: true, fdR: true, lsL: false, lsR: false, ovlL: null, ovlR: null, ndModeL: 'ARC', ndModeR: 'ARC', ndRangeL: 10, ndRangeR: 10,
     baroUnitL: 'hPa', baroUnitR: 'hPa', adf1L: 'OFF', adf2L: 'OFF', adf1R: 'OFF', adf2R: 'OFF',
     // radio panels, transponder, sidestick (flight control check)
-    rmpOn1: true, rmpOn2: true, rmpSel1: 'VHF1', rmpSel2: 'VHF2', altRptg: true, stickL: 'NEUTRAL'
+    rmpOn1: true, rmpOn2: true, rmpSel1: 'VHF1', rmpSel2: 'VHF2', altRptg: true, stickL: 'NEUTRAL',
+    gearLever: 'DN'
   };
 }
 
@@ -72,17 +76,23 @@ export function createSystems(opt = {}) {
       cond: { sel: [22, 23, 23], zone: [26.4, 25.2, 25.8], duct: [26.4, 25.2, 25.8], packOut: [OAT + 4, OAT + 4], hotValve: 0 },
       doors: { fwdL: 1, bridge: true, t: -1 },
       brakes: { temp: [68, 74, 61, 70] },
-      fctl: { elev: [-12, -12], ail: [-6, -6], spl: [[0, 0, 0, 0], [0, 0, 0, 0]], rud: 0 }
+      fctl: { elev: [-12, -12], ail: [-6, -6], spl: [[0, 0, 0, 0], [0, 0, 0, 0]], rud: 0, seen: {} },
+      fdm: null, af: createAutoflight(), inp: { pitch: 0, roll: 0, rudder: 0, tiller: 0, brakeL: 0, brakeR: 0 },
+      toCfg: { testT: -99, faults: [], warn: false }, chronoT: -1, stopBar: true, rtoInject: null, callouts: {},
+      mon: { taxiMax: 0, taxiOverT: 0, stopBarRun: false, held: 0, atHold: false, cleared: false, toCl: { max: 0, sum: 0, n: 0 }, rot: null, liftoff: null, flapOver: 0, gearOver: 0, reject: null, stopRemain: null, onRunway: false, lined: false }
     };
   }
   sys.st = freshState();
+  const fdm = createFDM(); sys.st.fdm = fdm; sys.st.brakes = { temp: fdm.brakeT };
   const emit = (type, data = {}) => sys.events.push({ type, ...data, t: sys.t });
 
   /* ---------------- initial states ---------------- */
   sys.reset = (kind = 'cold') => {
     sys.t = 0; sys.acc = 0; sys.events.length = 0; sys.fireInject = null;
     sys.sw = coldSwitches(); sys.st = freshState();
-    if (kind === 'beforeStart') beforeStart();
+    sys.st.fdm = fdm; fdm.reset(kind === 'lineup' ? 'lineup' : 'park'); sys.st.brakes = { temp: fdm.brakeT };
+    if (kind === 'beforeStart' || kind === 'stand' || kind === 'lineup') beforeStart();
+    if (kind === 'stand' || kind === 'lineup') enginesRunning(kind);
     sys.kind = kind;
     update(0);
   };
@@ -101,12 +111,30 @@ export function createSystems(opt = {}) {
     Object.assign(w, { fdL: true, fdR: true, athr: false });
   }
 
+  /* engines running at the stand (taxi scenario) or lined up on the runway (rejected take-off) */
+  function enginesRunning(kind) {
+    const w = sys.sw, s = sys.st;
+    Object.assign(w, { apuMaster: false, apuBleed: false, pack1: true, pack2: true, engMode: 'NORM', master1: true, master2: true, beacon: 1, xbleed: 'AUTO' });
+    Object.assign(s.apu, { n: 0, egt: OAT + 40, phase: 'OFF', avail: false, bleedUsed: 0 }); Object.assign(s.bleed, { apuValve: 0, apuP: 0, xValve: 0 });
+    s.eng.forEach((e, i) => Object.assign(e, { n1: REF.idleN1[i], n2: REF.idleN2[i], egt: REF.idleEGT[i], ff: REF.idleFF[i], oilP: 6 + REF.idleN2[i] * 0.42, oilT: 72, oilQ: 13.3 - i * 0.6, phase: 'RUN', running: true, lit: true, fuelOn: true, fadec: true, vib1: 0.3, vib2: 0.6 }));
+    s.hyd.p = [3000, 3000, 3000]; s.hyd.accu = 3000; s.doors.fwdL = 0; s.doors.bridge = false; s.doors.t = -50;
+    if (kind === 'lineup') {
+      Object.assign(w, { flaps: 1, spdBrk: 1, autoBrk: 3, parkBrk: false, strobe: 2, landL: 2, landR: 2, nose: 2, xpdr: 2, navLogo: 1 });
+      s.fdm.flap = 1; s.stopBar = false; s.mon.cleared = true; s.toCfg.testT = -20; s.chronoT = 0;
+    }
+    for (let i = 0; i < 5; i++) update(DT);
+    s.fdm.u = 0;
+  }
+
   /* ---------------- momentary actions ---------------- */
   sys.press = (id) => {
     const s = sys.st, w = sys.sw, dc = s.elec.dc;
     if (id === 'apuStart') { if (w.apuMaster && dc && !s.apu.avail && s.apu.phase !== 'COOL' && s.apu.phase !== 'SPOOL') { s.apu.startReq = true; emit('apuStartReq'); } return; }
     if (id === 'masterWarn') { for (const a of s.alerts) if (a.lvl === 'W') s.ack.add(a.id); s.master.warn = false; s.master.crc = false; if (s.eng.some(e => e.fire)) s.ackFire = true; return; }
     if (id === 'masterCaut') { for (const a of s.alerts) if (a.lvl === 'C') s.ack.add(a.id); s.master.caut = false; return; }
+    if (id === 'toConfig') { if (!s.elec.ac) return; s.toCfg.testT = sys.t; s.toCfg.faults = toConfigFaults(); s.toCfg.tested = true; emit(s.toCfg.faults.length ? 'toConfigBad' : 'toConfigOk'); return; }
+    if (id === 'push') { if (w.beacon && s.fdm.startPush()) { s.mon.pushCalled = true; } else emit('pushRefused', { why: w.beacon ? 'not now' : 'beacon off' }); return; }
+    if (id === 'chrono') { s.chronoT = sys.t; return; }
     if (id === 'test1' || id === 'testApu' || id === 'test2') { if (!dc) return; const k = id === 'test1' ? 'eng1' : id === 'test2' ? 'eng2' : 'apu'; s.fireTest[k] = 3.2; return; }
     const m = /^agent(1|2|Apu)_(\d)$/.exec(id);
     if (m) {
@@ -143,7 +171,7 @@ export function createSystems(opt = {}) {
 
   function update(dt) {
     sys.t += dt;
-    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); cabin(dt); fctl(dt); avUpdate(sys); alerts(dt); pages();
+    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); motion(dt); cabin(dt); fctl(dt); avUpdate(sys); monitor(dt); alerts(dt); pages();
   }
 
   function electrics(dt) {
@@ -288,7 +316,12 @@ export function createSystems(opt = {}) {
       const n = i + 1, master = w['master' + n], pbOut = w['firePb' + n];
       const fuelAvail = master && !pbOut;
       e.fadec = E.dc && (w.engMode !== 'NORM' || master || e.n2 > 5);
-      const tl = w['thr' + n] > 0 ? [0, 0.62, 0.86, 1][w['thr' + n]] : 0;
+      // N1 command from the thrust lever (or the autothrust within the lever limit); thrust follows N1 with spool-up lag
+      const Fd = s.fdm, af = s.af, L = w['thr' + n];
+      let n1Cmd = leverN1(L, REF.idleN1[i], s.av.fms.flex, Fd.alt);
+      if (af.athrActive && af.n1c != null) n1Cmd = Math.max(REF.idleN1[i], Math.min(n1Cmd, af.n1c + (REF.idleN1[i] - 20) * 0));
+      e.n1Cmd = n1Cmd;
+      const tl = clamp((e.n1 - REF.idleN1[i]) / (92 - REF.idleN1[i]), 0, 1.05);
       const duct = B.duct[i];
       const f = clamp((duct - 14) / 22, 0.25, 1.1);
       const idleN2 = REF.idleN2[i], idleN1 = REF.idleN1[i];
@@ -327,23 +360,24 @@ export function createSystems(opt = {}) {
       else if (e.lit && e.phase === 'START') {
         if (e.n2 < REF.startValveCut) e.n2 += dt * spd * 1.25 * (0.55 + 0.45 * (e.sv ? f : 0.3)) * Math.pow(Math.max(0.02, 1 - e.n2 / 62), 0.75) * 1.9;
         else e.n2 = lag(e.n2, idleN2, 3.6 / spd, dt);
-      } else if (e.phase === 'RUN') e.n2 = lag(e.n2, idleN2 + tl * 38, tl > 0 ? 2.5 : 3, dt);
+      } else if (e.phase === 'RUN') { const up = e.n1Cmd > e.n1; e.n1 = up ? Math.min(e.n1Cmd, e.n1 + dt * (2.4 + 0.11 * (e.n1 - 20))) : lag(e.n1, e.n1Cmd, 1.6, dt); e.n2 = lag(e.n2, idleN2 + (e.n1 - idleN1) * 0.52, 0.6, dt); }
       else e.n2 = Math.max(0, e.n2 - dt * (e.n2 / 9 + 0.25));
       if (e.n2 < 0.05 && e.phase === 'SPOOL') { e.n2 = 0; e.phase = 'OFF'; }
       // N1 follows N2 once the core is burning
       const n1T = e.lit ? (e.phase === 'RUN' ? idleN1 + tl * 64 : idleN1 * Math.pow(clamp((e.n2 - 20) / (idleN2 - 20), 0, 1), 1.5)) : Math.max(0, e.n2 * 0.05 - 0.3);
-      e.n1 = lag(e.n1, n1T, e.lit ? 1.6 : 5, dt);
+      if (e.phase !== 'RUN') e.n1 = lag(e.n1, n1T, e.lit ? 1.6 : 5, dt);
+      e.thrust = e.running || e.phase === 'SPOOL' ? thrustOf(e.n1, ELEV_FT * FT + Fd.h, Fd.tas * KT / 340) * (e.n1 > idleN1 - 3 ? 1 : 0.3) : 0;
       // EGT: rise at light-off, start peak, then idle (approximate)
       const peak = 595 + (1 - clamp(f, 0, 1)) * 230;
       let egtT;
       if (e.lit) {
         if (e.phase === 'START') { const sN = clamp((e.n2 - 18) / 40, 0, 1); const base = (OAT + 150) + (REF.idleEGT[i] - OAT - 150) * sN; const at34 = (OAT + 150) + (REF.idleEGT[i] - OAT - 150) * 0.4; egtT = base + (peak - at34) * Math.exp(-Math.pow((e.n2 - 34) / 10, 2)); }
-        else egtT = REF.idleEGT[i] + tl * 380;
+        else egtT = REF.idleEGT[i] + tl * 420;
       } else egtT = Math.max(OAT + 6, OAT + (e.egt - OAT) * 0.0);
       e.egt = lag(e.egt, egtT, e.lit ? 2.2 : 14, dt);
       e.egtMax = Math.max(e.egtMax, e.egt);
       // fuel flow
-      const ffT = e.fuelOn ? (e.lit ? (e.phase === 'RUN' ? REF.idleFF[i] + tl * 2600 : 240 + clamp(e.n2 - 20, 0, 40) * 2.2) : 200) : 0;
+      const ffT = e.fuelOn ? (e.lit ? (e.phase === 'RUN' ? REF.idleFF[i] + Math.pow(tl, 1.4) * 2900 : 240 + clamp(e.n2 - 20, 0, 40) * 2.2) : 200) : 0;
       e.ff = lag(e.ff, ffT, 0.8, dt);
       e.oilP = lag(e.oilP, e.n2 > 3 ? 6 + e.n2 * 0.42 : 0, 1.5, dt);
       e.oilT = lag(e.oilT, e.running ? 72 : e.n2 > 5 ? e.oilT + 2 : OAT + 6, e.running ? 120 : 400, dt);
@@ -419,19 +453,82 @@ export function createSystems(opt = {}) {
     // the ground crew closes the forward door and pulls the jet bridge back once the beacon is on
     if (w.beacon && Dr.bridge && Dr.t < 0) Dr.t = sys.t;
     if (Dr.t >= 0) { Dr.fwdL = clamp(1 - (sys.t - Dr.t - 2) / 3, 0, 1); if (Dr.bridge && sys.t - Dr.t > 9) { Dr.bridge = false; emit('bridgeOff'); } }
-    const bt = s.brakes.temp; for (let j = 0; j < 4; j++) bt[j] = OAT + (bt[j] - OAT) * Math.exp(-dt / 1500);
+
   }
   /* flight controls: surfaces follow the captain's sidestick when hydraulic pressure is there (simplified) */
   function fctl(dt) {
-    const s = sys.st, H = s.hyd.p, Fc = s.fctl, v = sys.sw.stickL;
+    const s = sys.st, H = s.hyd.p, Fc = s.fctl;
     const ok = i => H[i] > 1450, any = (...ix) => ix.some(ok);
-    const pitch = v === 'AFT' ? 1 : v === 'FWD' ? -1 : 0, roll = v === 'LEFT' ? -1 : v === 'RIGHT' ? 1 : 0;
+    const { pitch, roll } = sys.stick();
+    if (any(0, 1, 2)) { if (pitch > 0.85) Fc.seen.aft = true; if (pitch < -0.85) Fc.seen.fwd = true; if (roll < -0.85) Fc.seen.left = true; if (roll > 0.85) Fc.seen.right = true; }
+    Fc.checked = !!(Fc.seen.aft && Fc.seen.fwd && Fc.seen.left && Fc.seen.right);
     const mv = (cur, tgt, pw) => towards(cur, tgt, pw ? 40 : 6, dt);
     const el = pitch > 0 ? 30 * pitch : 15 * pitch;
     Fc.elev[0] = mv(Fc.elev[0], any(0, 1) ? el : -12, any(0, 1)); Fc.elev[1] = mv(Fc.elev[1], any(0, 2) ? el : -12, any(0, 2));
     Fc.ail[0] = mv(Fc.ail[0], any(0, 1) ? -roll * 25 : -6, any(0, 1)); Fc.ail[1] = mv(Fc.ail[1], any(0, 1) ? roll * 25 : -6, any(0, 1));
     for (const sd of [0, 1]) for (let j = 0; j < 4; j++) { const sysI = [0, 2, 1, 2][j], up = (sd === 0 ? roll < 0 : roll > 0) ? 35 * Math.abs(roll) : 0; Fc.spl[sd][j] = mv(Fc.spl[sd][j], ok(sysI) ? up : 0, true); }
-    Fc.rud = mv(Fc.rud, 0, any(0, 1, 2));
+    Fc.rud = mv(Fc.rud, (s.inp.rudder || 0) * 25, any(0, 1, 2));
+    if (s.fdm.spoiler > 0.05) for (const sd of [0, 1]) for (let j = 0; j < 4; j++) Fc.spl[sd][j] = Math.max(Fc.spl[sd][j], 40 * s.fdm.spoiler);
+  }
+
+  /** effective stick: continuous pilot input, or the clicked check positions of the 3D stick */
+  sys.stick = () => { const i = sys.st.inp, v = sys.sw.stickL; if (Math.abs(i.pitch) > 0.02 || Math.abs(i.roll) > 0.02) return { pitch: i.pitch, roll: i.roll }; return { pitch: v === 'AFT' ? 1 : v === 'FWD' ? -1 : 0, roll: v === 'LEFT' ? -1 : v === 'RIGHT' ? 1 : 0 }; };
+  function toConfigFaults() {
+    const w = sys.sw, s = sys.st, f = [];
+    if (w.flaps < 1 || w.flaps > 3) f.push('FLAPS NOT IN T.O CONFIG');
+    if (w.spdBrk > 1) f.push('SPD BRK NOT RETRACTED');
+    if (Math.max(...s.fdm.brakeT) > 300) f.push('BRAKES HOT');
+    if (w.parkBrk && s.toCfg.atThrust) f.push('PARK BRK ON');
+    return f;
+  }
+  /* aircraft motion: pilot inputs + autoflight → flight model; gear and flaps follow their levers */
+  function motion(dt) {
+    const w = sys.sw, s = sys.st, Fd = s.fdm, i = s.inp;
+    const g = autoflight(sys, dt);
+    const st = sys.stick();
+    const thrIdle = w.thr1 < 0.05 && w.thr2 < 0.05;
+    Fd.step(dt, { T: [s.eng[0].thrust || 0, s.eng[1].thrust || 0], pitch: st.pitch, roll: st.roll, rudder: i.rudder, tiller: i.tiller, brakeL: i.brakeL, brakeR: i.brakeR,
+      park: w.parkBrk && s.hyd.accu > 500, flapLever: w.flaps, gearDown: w.gearLever !== 'UP', spoilerArmed: !!w.spdBrk, autoBrk: w.autoBrk, thrIdle, ap: g.ap, wind: WIND });
+    for (const e of Fd.events) emit(e.type, e); Fd.events.length = 0;
+    if (w.gearLever === 'UP' && Fd.onGround) w.gearLever = 'DN';      // gear lever is locked down on the ground
+    // take-off thrust with a wrong configuration: red T.O CONFIG warning
+    s.toCfg.atThrust = Fd.onGround && Math.min(w.thr1, w.thr2) >= 1.94;
+    s.toCfg.live = s.toCfg.atThrust ? toConfigFaults() : [];
+  }
+  /* scoring and guidance data: taxi speed, stop bar, centre-line, rotation, limits, rejected take-off; callouts */
+  function monitor(dt) {
+    const w = sys.sw, s = sys.st, Fd = s.fdm, M = s.mon, sn = toSN(Fd.x, Fd.z), C = s.callouts;
+    const onRwy = Math.abs(sn.n - RWY.n) < RWY.w / 2 + 3 && sn.s > RWY.s0 - 30 && sn.s < RWY.s1;
+    M.onRunway = onRwy; M.sn = sn;
+    M.lined = onRwy && Math.abs(sn.n - RWY.n) < 4 && Math.abs(((Fd.hdg - 274 + 540) % 360) - 180) < 6;
+    if (Fd.onGround && !onRwy) { M.taxiMax = Math.max(M.taxiMax, Fd.gs); if (Fd.gs > 30) M.taxiOverT += dt; }
+    // nose gear position against the stop bar
+    const nose = { x: Fd.x - Math.sin(Fd.yaw) * 12.6, z: Fd.z - Math.cos(Fd.yaw) * 12.6 }, ns = toSN(nose.x, nose.z);
+    M.nose = ns;
+    const nearHold = Math.abs(ns.s - HOLD.s) < 14;
+    if (nearHold && ns.n > HOLD.n - 25 && ns.n < HOLD.n) { M.atHold = Fd.gs < 1; M.held = M.atHold ? M.held + dt : 0; } else { M.atHold = false; M.held = 0; }
+    if (s.stopBar && nearHold && ns.n >= HOLD.n && ns.n < HOLD.n + 20 && !M.stopBarRun) { M.stopBarRun = true; emit('stopBarRun'); }
+    if (s.stopBar && M.held > 2) { s.stopBar = false; M.cleared = true; emit('cleared'); }
+    const route = nearest(TAXI_PATH, sn.s, sn.n); M.route = route;
+    // take-off roll: centre-line, callouts, rotation, lift-off, limits
+    const v1 = s.av.fms.v1 || 135, vr = s.av.fms.vr || 140, toRoll = Fd.onGround && onRwy && Math.min(w.thr1, w.thr2) >= 0.9;
+    if (Fd.onGround && onRwy && Fd.gs > 30) { const d = Math.abs(sn.n - RWY.n); M.toCl.max = Math.max(M.toCl.max, d); M.toCl.sum += d * d; M.toCl.n++; }
+    if (toRoll || (Fd.onGround && onRwy && Fd.ias > 60 && !M.reject)) {
+      const co = (k, v, t) => { if (!C[k] && Fd.ias >= v) { C[k] = true; emit('callout', { text: t }); } };
+      if (!M.reject) { co('100', 100, '100 knots'); co('v1', v1, 'V1'); co('vr', vr, 'Rotate'); }
+    }
+    if (Fd.onGround && Fd.pitch > 0.5 * Math.PI / 180 && !M.rot) M.rot = { t: sys.t, ias: Fd.ias };
+    if (!Fd.onGround && !M.liftoff) { M.liftoff = { t: sys.t, ias: Fd.ias, pitch: Fd.pitch * 180 / Math.PI, rate: M.rot ? Fd.pitch * 180 / Math.PI / Math.max(0.5, sys.t - M.rot.t) : 0, s: sn.s - RWY.s0 }; }
+    if (M.liftoff && !C.pos && Fd.vs > 1.5 && Fd.ra > 30) { C.pos = true; emit('callout', { text: 'Positive climb' }); }
+    if (!Fd.onGround) { M.maxPitch = Math.max(M.maxPitch || 0, Fd.pitch * 180 / Math.PI); }
+    const vfe = AF.VFE[Math.round(Fd.flap)] ?? 350; if (Fd.flap > 0.2 && Fd.ias > vfe + 3) M.flapOver = Math.max(M.flapOver, Fd.ias - vfe);
+    if (Fd.gear > 0.02 && Fd.gear < 0.98 && Fd.ias > AF.VLO + 3) M.gearOver = Math.max(M.gearOver, Fd.ias - AF.VLO);
+    if (Fd.gear >= 0.98 && Fd.ias > AF.VLE + 3) M.gearOver = Math.max(M.gearOver, Fd.ias - AF.VLE);
+    // rejected take-off: injected warning before V1, then the levers to idle
+    const R = s.rtoInject;
+    if (R && !R.fired && Fd.onGround && Fd.ias >= R.ias) { R.fired = true; R.t = sys.t; emit('rtoWarn'); }
+    if (R && R.fired && !M.reject && w.thr1 < 0.05 && w.thr2 < 0.05) M.reject = { ias: Fd.ias, t: sys.t, dt: sys.t - R.t, v1 };
+    if (M.reject && Fd.gs < 0.5 && M.stopRemain == null) M.stopRemain = { s: RWY.s1 - sn.s, on: onRwy, t: sys.t };
   }
 
   function alerts(dt) {
@@ -453,6 +550,9 @@ export function createSystems(opt = {}) {
         }
         if (e.fault) A.push({ id: 'sf' + n, lvl: 'C', title: `ENG ${n} START FAULT`, lines: e.man ? [{ t: e.fault + ' – MANUAL START' }, { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] }, { t: `MAN START ${n} → OFF`, done: !w['manStart' + n] }] : [{ t: e.fault + ' – AUTO START ABORTED' }, { t: `ENG MASTER ${n} → OFF`, done: !w['master' + n] }] });
       });
+      if (s.toCfg.live && s.toCfg.live.length) A.push({ id: 'cfg', lvl: 'W', title: 'CONFIG', lines: s.toCfg.live.map(t => ({ t })) });
+      else if (s.toCfg.faults.length && sys.t - s.toCfg.testT < 20) A.push({ id: 'cfgt', lvl: 'C', title: 'T.O CONFIG', lines: s.toCfg.faults.map(t => ({ t })) });
+      if (s.rtoInject && s.rtoInject.fired && s.fdm.onGround) A.push({ id: 'ovht', lvl: 'W', title: 'ENG 1 OVERHEAT', lines: [{ t: 'BEFORE V1: REJECT (THRUST IDLE, BRAKE)', done: s.mon.reject != null }] });
       for (const [k, name] of [['eng1', 'ENG 1'], ['apu', 'APU'], ['eng2', 'ENG 2']]) if (s.fireTest[k] > 0) A.push({ id: 'test' + k, lvl: 'W', title: `${name} FIRE (TEST)`, lines: [] });
       if (s.eng[0].running && !s.fuel.pressL && !(s.fuel.xOpen > 0.5 && s.fuel.pressR)) A.push({ id: 'fpL', lvl: 'C', title: 'FUEL L TANK PUMPS LO PRESS', lines: [{ t: 'L TK PUMPS → ON' }] });
       if (s.eng[1].running && !s.fuel.pressR && !(s.fuel.xOpen > 0.5 && s.fuel.pressL)) A.push({ id: 'fpR', lvl: 'C', title: 'FUEL R TANK PUMPS LO PRESS', lines: [{ t: 'R TK PUMPS → ON' }] });
@@ -471,6 +571,9 @@ export function createSystems(opt = {}) {
       if (w.engMode === 'IGN') M.push({ t: 'IGNITION SELECTED', c: 'g' });
       s.eng.forEach((e, i) => { if (e.phase === 'START') M.push({ t: e.crank ? `ENG ${i + 1} DRY CRANK` : e.man ? `ENG ${i + 1} MANUAL START` : `ENG ${i + 1} START IN PROGRESS`, c: 'g' }); else if (w['manStart' + (i + 1)]) M.push({ t: `ENG ${i + 1} MAN START ON`, c: 'g' }); });
       if (s.doors.fwdL > 0.05) M.push({ t: 'FWD CABIN DOOR OPEN', c: 'w' });
+      if (!s.toCfg.faults.length && sys.t - s.toCfg.testT < 12 && s.toCfg.tested) M.push({ t: 'T.O CONFIG NORMAL', c: 'g' });
+      if (w.autoBrk === 3 && s.fdm.onGround) M.push({ t: s.fdm.abActive ? 'AUTO BRK RTO' : 'AUTO BRK MAX', c: 'g' });
+      if (w.spdBrk && !s.fdm.onGround) M.push({ t: 'SPEED BRAKE ARMED', c: 'a' });
       if (w.seatBelts) M.push({ t: 'BELTS SIGN ON', c: 'g' });
       if (w.noSmoking) M.push({ t: 'NO SMOKING SIGN ON', c: 'g' });
       if (w.parkBrk) M.push({ t: 'PARKING BRAKE SET', c: 'g' });
@@ -541,14 +644,16 @@ export function createSystems(opt = {}) {
     L.masterWarn = { t: lv(s.master.warn), b: 0, flash: true }; L.masterCaut = { t: lv(s.master.caut), b: 0 };
     // display page buttons (need AC)
     for (const p of ['ENG', 'BLEED', 'PRESS', 'ELEC', 'HYD', 'FUEL', 'APU', 'COND', 'DOOR', 'WHEEL', 'FCTL', 'STS']) L['sd' + p] = { t: E.ac && s.sdPage === p ? 1 : 0, b: 0 };
-    // landing gear indication (decorative: three green)
-    L.gearL = { t: lv(true), b: 0 }; L.gearN = { t: lv(true), b: 0 }; L.gearR = { t: lv(true), b: 0 };
+    // landing gear: green DN when down and locked; autobrake ON (blue) and DECEL (green)
+    const gd = s.fdm.gear >= 0.999; L.gearL = { t: lv(gd), b: 0 }; L.gearN = { t: lv(gd), b: 0 }; L.gearR = { t: lv(gd), b: 0 };
+    for (const [id, v] of [['autoBrkLo', 1], ['autoBrkMed', 2], ['autoBrkMax', 3]]) L[id] = { t: lv(w.autoBrk === v && s.fdm.abDecel), b: lv(w.autoBrk === v) };
     if (on && w.annLt === 2) for (const k in L) { L[k] = { t: 1, b: 1, flash: L[k].flash }; }
     const dim = w.annLt === 0 ? 0.45 : 1;
     if (dim !== 1) for (const k in L) { L[k].t *= dim; L[k].b *= dim; }
     return L;
   };
 
+  sys.emit = emit;
   sys.alignRemaining = () => { const al = sys.st.irs.filter(r => r.mode === 'NAV' && !r.aligned); if (!al.length) return 0; return Math.max(...al.map(r => (r.test > 0 ? 1 : 1 - r.prog))) * (sys.fast ? REF.irsAlignFast : REF.irsAlign); };
   sys.reset('cold');
   return sys;

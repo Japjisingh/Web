@@ -172,7 +172,7 @@ export function fcuRule(sys, id, v) {
   const w = sys.sw, s = sys.st;
   if (!v) return true;
   if (!s.elec.ac) return false;
-  if (id === 'ap1' || id === 'ap2') { if (!s.irs.some(r => r.aligned)) return false; const other = id === 'ap1' ? 'ap2' : 'ap1'; if (w[other] && !w.appr) w[other] = false; }
+  if (id === 'ap1' || id === 'ap2') { if (!s.irs.some(r => r.aligned) || !s.fdm || s.fdm.onGround || s.fdm.ra < 100) return false; const other = id === 'ap1' ? 'ap2' : 'ap1'; if (w[other] && !w.appr) w[other] = false; }
   if (id === 'loc' && w.appr) w.appr = false;
   if (id === 'appr' && w.loc) w.loc = false;
   return true;

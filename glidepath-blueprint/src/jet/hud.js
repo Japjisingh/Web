@@ -112,6 +112,37 @@ const CSS = `
   .jh-dock.sheet{display:flex;left:0;right:0;top:auto;bottom:0;width:auto;height:62cqh;border-radius:16px 16px 0 0}
 }
 @container jhud (max-height: 380px){ .jh-why{display:none} .jh-dock{top:56px} }
+/* callout pill (speed callouts, ATC and ground-crew messages) */
+.jh-co{position:absolute;left:50%;top:100px;transform:translateX(-50%);padding:9px 18px;border-radius:999px;font:700 20px/1 var(--f-display,sans-serif);letter-spacing:.03em;opacity:0;transition:opacity .35s;pointer-events:none!important;white-space:nowrap}
+.jh-co.show{opacity:1}.jh-co.W{background:rgba(120,14,10,.7);border-color:rgba(255,90,70,.6);color:#ffd9d4}
+/* on-screen flying controls (touch and mouse) */
+.jh-fly{position:absolute;right:12px;bottom:12px;display:none;gap:10px;padding:10px;border-radius:18px;align-items:stretch;touch-action:none;user-select:none;-webkit-user-select:none}
+.jh-fly.on{display:flex}
+.jhud.flying .jh-dock{bottom:236px}
+.jh-fly .thr{position:relative;width:46px;border-radius:12px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.12);cursor:ns-resize}
+.jh-fly .thr i{position:absolute;left:4px;right:4px;height:2px;background:rgba(255,255,255,.35)}
+.jh-fly .thr i b{position:absolute;right:calc(100% + 4px);top:-6px;font:700 9px/1 var(--f-mono,monospace);color:#93a9b3;letter-spacing:.04em}
+.jh-fly .thr .h{position:absolute;left:3px;right:3px;height:22px;margin-top:-11px;border-radius:7px;background:linear-gradient(#dfe7ea,#9aa8ae);box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.jh-fly .pad{position:relative;width:146px;height:146px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.06),rgba(0,0,0,.25));border:1px solid rgba(255,255,255,.14);cursor:move}
+.jh-fly .pad::before,.jh-fly .pad::after{content:'';position:absolute;background:rgba(255,255,255,.12)}.jh-fly .pad::before{left:50%;top:10%;bottom:10%;width:1px}.jh-fly .pad::after{top:50%;left:10%;right:10%;height:1px}
+.jh-fly .pad .n{position:absolute;width:42px;height:42px;margin:-21px 0 0 -21px;left:50%;top:50%;border-radius:50%;background:radial-gradient(circle at 35% 30%,#f4f7f8,#8796a0);box-shadow:0 3px 10px rgba(0,0,0,.55)}
+.jh-fly .pad .lb{position:absolute;bottom:6px;left:0;right:0;text-align:center;font:700 9px/1 var(--f-mono,monospace);color:#93a9b3;letter-spacing:.08em}
+.jh-fly .col{display:flex;flex-direction:column;gap:6px;justify-content:space-between;width:150px}
+.jh-fly .til{position:relative;height:30px;border-radius:999px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.12);cursor:ew-resize}
+.jh-fly .til .n{position:absolute;top:3px;width:34px;height:22px;margin-left:-17px;left:50%;border-radius:999px;background:linear-gradient(#dfe7ea,#9aa8ae)}
+.jh-fly .til .lb{position:absolute;top:8px;left:10px;font:700 9px/1 var(--f-mono,monospace);color:#93a9b3}
+.jh-fly .btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+.jh-fly .btns button{padding:7px 4px;border-radius:10px;font-size:11.5px}
+.jh-fly .brk{padding:10px 0!important;border-radius:12px!important;font-size:13px!important;letter-spacing:.06em}
+.jh-fly .brk.on{background:#ff8a80!important;color:#1a0505!important;border-color:#ff8a80!important}
+.jh-help{position:absolute;right:12px;top:58px;width:min(360px,calc(100cqw - 24px));max-height:calc(100cqh - 76px);overflow:auto;padding:14px 16px;display:none}
+.jh-help.open{display:block}.jh-help h4{margin:0 0 6px;font:700 15px/1.2 var(--f-display,sans-serif)}.jh-help table{width:100%;border-collapse:collapse;font-size:12.5px}.jh-help td{padding:3px 4px;vertical-align:top;border-top:1px solid rgba(255,255,255,.08)}.jh-help td:first-child{white-space:nowrap;font-family:var(--f-mono,monospace);color:#9fe0ee;font-size:11.5px}
+@container jhud (max-width: 600px){
+  .jh-fly{right:6px;left:6px;bottom:126px;justify-content:space-between;padding:7px;gap:6px}
+  .jh-fly .pad{width:118px;height:118px}.jh-fly .col{width:auto;flex:1}.jh-fly .thr{width:40px}
+  .jhud.flying .jh-dock.sheet{height:46cqh}
+  .jh-co{top:52px;font-size:16px}
+}
 `;
 
 const ICON = { pending: '○', current: '▸', done: '✓', late: '↯', missed: '✕', na: '–' };
@@ -138,10 +169,33 @@ export function createHUD(wrap, api) {
   <div class="g jh-call"><div class="t"></div><div class="a"></div></div>
   <div class="g jh-edge" role="button" tabindex="0"><b>➜</b><span></span></div>
   <div class="g jh-tip"></div>
+  <div class="g jh-co" aria-live="assertive"></div>
+  <div class="g jh-help" role="dialog" aria-label="Flying controls help"><h4>Flying controls</h4><table>
+    <tr><td>W / S</td><td>Sidestick forward / back (pitch). The aircraft holds its attitude when you let go.</td></tr>
+    <tr><td>A / D</td><td>Sidestick left / right (roll)</td></tr>
+    <tr><td>Q / E</td><td>Rudder pedals (steer a little on the ground, yaw in the air)</td></tr>
+    <tr><td>Z / C</td><td>Tiller: nose-wheel steering at taxi speed (springs back)</td></tr>
+    <tr><td>B · , · .</td><td>Toe brakes: both, left, right (hold)</td></tr>
+    <tr><td>PgUp / PgDn</td><td>Thrust levers to the next detent: IDLE, CL, FLX/MCT, TOGA. Home = IDLE, End = TOGA</td></tr>
+    <tr><td>F / V</td><td>Flaps one step down / up</td></tr>
+    <tr><td>G</td><td>Gear lever up / down</td></tr>
+    <tr><td>P</td><td>Call for pushback</td></tr>
+    <tr><td>1–4 · 5</td><td>Cockpit views · Outside view (drag to orbit, wheel to zoom)</td></tr>
+    <tr><td>Mouse</td><td>Drag the 3D sidestick, tiller or thrust levers (Shift: one lever). Click switches and knobs as before.</td></tr>
+    <tr><td>Gamepad</td><td>Left stick = sidestick, right stick = rudder / tiller, triggers = brakes, bumpers = thrust</td></tr>
+    <tr><td>Touch</td><td>On-screen stick, thrust slider, tiller slider and the BRAKE button (hold)</td></tr>
+  </table><p style="margin:8px 0 0;color:#93a9b3;font-size:12px">Generic, simplified flight model and autopilot for procedure training. Not a certified device.</p></div>
+  <div class="g jh-fly" aria-label="On-screen flying controls">
+    <div class="thr" role="slider" aria-label="Thrust levers" tabindex="0"><i style="top:92%"><b>IDLE</b></i><i style="top:62%"><b>CL</b></i><i style="top:35%"><b>FLX</b></i><i style="top:8%"><b>TOGA</b></i><div class="h"></div></div>
+    <div class="pad" aria-label="Sidestick"><div class="n"></div><span class="lb">STICK</span></div>
+    <div class="col"><div class="til" aria-label="Tiller and rudder"><span class="lb">TILLER</span><div class="n"></div></div>
+      <button class="brk" aria-label="Brakes (hold)">BRAKE</button>
+      <div class="btns"><button data-f="gear">GEAR</button><button data-f="flapsUp" aria-label="Flaps up">FLP −</button><button data-f="flapsDn" aria-label="Flaps down">FLP +</button><button data-f="push">PUSH</button><button data-f="park">P.BRK</button><button data-f="help" aria-label="Controls help">?</button></div></div>
+  </div>
   <div class="g jh-deb" role="dialog" aria-label="Debrief"></div>
   <div class="g jh-hint">Drag to look · tap a control · pinch or wheel to zoom</div>`;
   const q = s => root.querySelector(s);
-  const H = { root, tip: q('.jh-tip'), edge: q('.jh-edge'), call: q('.jh-call'), lead: q('.lead'), deb: q('.jh-deb'), step: q('.jh-step'), dock: q('.jh-dock') };
+  const H = { co: null, root, tip: q('.jh-tip'), edge: q('.jh-edge'), call: q('.jh-call'), lead: q('.lead'), deb: q('.jh-deb'), step: q('.jh-step'), dock: q('.jh-dock') };
   const menu = q('.jh-menu'), menuB = q('.jh-menuB');
   menuB.addEventListener('click', () => { const o = !menu.classList.contains('open'); menu.classList.toggle('open', o); menuB.setAttribute('aria-expanded', String(o)); });
   const groups = {};
@@ -216,6 +270,27 @@ export function createHUD(wrap, api) {
     H.deb.classList.add('show');
   };
   H.hideDebrief = () => H.deb.classList.remove('show');
+  // callout pill
+  let coT = 0; H.callout = (t, lvl = '') => { const c = q('.jh-co'); c.textContent = t; c.className = 'g jh-co show ' + lvl; clearTimeout(coT); coT = setTimeout(() => c.classList.remove('show'), lvl ? 3500 : 2200); };
+  H.toggleHelp = (o) => { const h = q('.jh-help'); h.classList.toggle('open', o ?? !h.classList.contains('open')); };
+  // on-screen flying controls: spring-loaded stick and tiller, thrust slider with detents, hold-to-brake
+  H.fly = (() => {
+    const el = q('.jh-fly'), pad = el.querySelector('.pad'), knob = pad.querySelector('.n'), thr = el.querySelector('.thr'), th = thr.querySelector('.h'), til = el.querySelector('.til'), tk = til.querySelector('.n'), brk = el.querySelector('.brk');
+    const st = { pitch: 0, roll: 0, tiller: 0, brake: 0 }; let want = false, user = true;
+    const send = () => api.flyInput && api.flyInput({ ...st });
+    const drag = (target, onMove, onUp) => { target.addEventListener('pointerdown', e => { e.preventDefault(); target.setPointerCapture(e.pointerId); onMove(e); const mv = ev => onMove(ev), up = () => { target.removeEventListener('pointermove', mv); target.removeEventListener('pointerup', up); target.removeEventListener('pointercancel', up); onUp && onUp(); }; target.addEventListener('pointermove', mv); target.addEventListener('pointerup', up); target.addEventListener('pointercancel', up); }); };
+    drag(pad, e => { const r = pad.getBoundingClientRect(); st.roll = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2.4)); st.pitch = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height - 0.5) * 2.4)); knob.style.transform = `translate(${st.roll * r.width * 0.36}px,${st.pitch * r.height * 0.36}px)`; send(); }, () => { st.pitch = st.roll = 0; knob.style.transform = ''; send(); });
+    drag(til, e => { const r = til.getBoundingClientRect(); st.tiller = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2.3)); tk.style.left = (50 + st.tiller * 40) + '%'; send(); }, () => { st.tiller = 0; tk.style.left = '50%'; send(); });
+    const thrAt = e => { const r = thr.getBoundingClientRect(); return Math.max(0, Math.min(3, (1 - (e.clientY - r.top) / r.height - 0.08) / 0.84 * 3)); };
+    drag(thr, e => { api.flyThr && api.flyThr(thrAt(e), false); }, () => { api.flyThr && api.flyThr(null, true); });
+    thr.addEventListener('keydown', e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); api.flyStep && api.flyStep(e.key === 'ArrowUp' ? 1 : -1); } });
+    const bOn = on => { st.brake = on ? 1 : 0; brk.classList.toggle('on', on); send(); };
+    brk.addEventListener('pointerdown', e => { e.preventDefault(); brk.setPointerCapture(e.pointerId); bOn(true); }); for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) brk.addEventListener(ev, () => st.brake && bOn(false));
+    el.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { if (b.dataset.f === 'help') H.toggleHelp(); else api.flyAct && api.flyAct(b.dataset.f); }));
+    const pos = v => (1 - (0.08 + v / 3 * 0.84)) * 100;
+    return { el, show(on) { want = on; el.classList.toggle('on', want && user); root.classList.toggle('flying', want && user); }, setUser(on) { user = on; this.show(want); }, get user() { return user; },
+      sync(sys) { if (!want) return; th.style.top = pos((sys.sw.thr1 + sys.sw.thr2) / 2) + '%'; } };
+  })();
   H.closeMenu = () => { menu.classList.remove('open'); menuB.setAttribute('aria-expanded', 'false'); };
   return H;
 }

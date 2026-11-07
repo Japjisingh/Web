@@ -130,7 +130,7 @@ function run(key) {
   check(w.altInc === 1000, 'ALT increment 1000 ft'); turn('altKnob', 2); check(Fc.alt === 7000, 'ALT 5000 + 2 x 1000 = ' + Fc.alt);
   operate(sys, 'altInc', { to: 100 }); turn('altKnob', -3); check(Fc.alt === 6700, 'ALT increment 100 ft: ' + Fc.alt);
   knob('vsKnob', 'push'); check(Fc.vsMode && Fc.vs === 0, 'V/S pushed: level off, V/S 0'); turn('vsKnob', 12); check(Fc.vs === 1200, 'V/S +1200');
-  operate(sys, 'ap1'); check(w.ap1, 'AP 1 engages (logic only): IRS aligned and AC'); operate(sys, 'ap2'); check(w.ap2 && !w.ap1, 'AP 2 replaces AP 1 outside APPR');
+  operate(sys, 'ap1'); check(!w.ap1, 'AP 1 does not engage on the ground (needs about 100 ft)');
   operate(sys, 'loc'); operate(sys, 'appr'); check(w.appr && !w.loc, 'APPR clears LOC');
   check(Math.round(baroAlt(s.av, 0)) === 420, 'baro QNH ' + QNH_TODAY + ': PFD altitude = field elevation 420 ft');
   knob('baroL', 'push'); check(s.av.baro[0].std && Math.abs(baroAlt(s.av, 0) - 536) < 2, 'baro STD: pressure altitude ' + Math.round(baroAlt(s.av, 0)) + ' ft');

@@ -51,7 +51,10 @@ export const CTL = {
   thr1: { k: 'lever', sw: 'thr1', pos: [0, 1, 2, 3], labels: ['IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 1' }, thr2: { k: 'lever', sw: 'thr2', pos: [0, 1, 2, 3], labels: ['IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 2' },
   parkBrk: { k: 'pb', sw: 'parkBrk', name: 'PARKING BRAKE handle' }, flaps: { k: 'lever', sw: 'flaps', pos: [0, 1, 2, 3, 4], labels: ['0', '1', '2', '3', 'FULL'], name: 'FLAPS lever' },
   spdBrk: { k: 'lever', sw: 'spdBrk', pos: [0, 1], labels: ['RET', 'ARM'], name: 'SPEED BRAKE lever' }, xpdr: { k: 'rot', sw: 'xpdr', pos: [0, 1, 2], labels: ['STBY', 'AUTO', 'ON'], name: 'Transponder mode' },
-  autoBrk: { k: 'deco', name: 'AUTO BRK (not modelled)' },
+  autoBrkLo: { k: 'sel', sw: 'autoBrk', val: 1, toggle: true, name: 'AUTO BRK LO (landing)' }, autoBrkMed: { k: 'sel', sw: 'autoBrk', val: 2, toggle: true, name: 'AUTO BRK MED (landing)' },
+  autoBrkMax: { k: 'sel', sw: 'autoBrk', val: 3, toggle: true, name: 'AUTO BRK MAX (take-off: maximum braking if the take-off is rejected above about 72 kt)' },
+  toConfig: { k: 'mom', press: 'toConfig', name: 'T.O CONFIG test (flaps, speed brake, brakes)' }, push: { k: 'mom', press: 'push', name: 'Call for pushback' },
+  chrono: { k: 'mom', press: 'chrono', name: 'CHRONO (start timing)' },
   sdENG: { k: 'page', page: 'ENG', name: 'ENG page' }, sdBLEED: { k: 'page', page: 'BLEED', name: 'BLEED page' }, sdPRESS: { k: 'page', page: 'PRESS', name: 'PRESS page' }, sdELEC: { k: 'page', page: 'ELEC', name: 'ELEC page' },
   sdHYD: { k: 'page', page: 'HYD', name: 'HYD page' }, sdFUEL: { k: 'page', page: 'FUEL', name: 'FUEL page' }, sdAPU: { k: 'page', page: 'APU', name: 'APU page' }, sdCOND: { k: 'page', page: 'COND', name: 'COND page' },
   sdDOOR: { k: 'page', page: 'DOOR', name: 'DOOR page' }, sdWHEEL: { k: 'page', page: 'WHEEL', name: 'WHEEL page' }, sdFCTL: { k: 'page', page: 'FCTL', name: 'F/CTL page' }, sdSTS: { k: 'page', page: 'STS', name: 'STATUS page' },
@@ -69,7 +72,9 @@ export const CTL = {
   athr: pb('athr', 'A/THR (logic only on the ground)', F), loc: pb('loc', 'LOC (arms the localizer mode)', F), appr: pb('appr', 'APPR (arms the approach modes)', F), exped: pb('exped', 'EXPED', F),
   // displays / gauges (touch only)
   pfd: { k: 'ind', name: 'Primary flight display' }, nd: { k: 'ind', name: 'Navigation display' }, ewd: { k: 'ind', name: 'ENGINE & WARNING display' }, sd: { k: 'ind', name: 'SYSTEMS display' },
-  stby: { k: 'ind', name: 'Standby instrument' }, clock: { k: 'ind', name: 'Clock' }, brakeGauge: { k: 'ind', name: 'Brake and accumulator pressure' }, gear: { k: 'deco', name: 'Landing gear lever (down, not modelled)' }
+  stby: { k: 'ind', name: 'Standby instrument' }, clock: { k: 'ind', name: 'Clock' }, brakeGauge: { k: 'ind', name: 'Brake and accumulator pressure' },
+  gear: { k: 'lever', sw: 'gearLever', pos: ['UP', 'DN'], labels: ['UP', 'DOWN'], name: 'Landing gear lever (locked down on the ground)' },
+  tiller: { k: 'ind', name: 'Nose-wheel steering tiller (drag left / right; keys Z and C)' }
 };
 
 // EFIS control panels (captain L, first officer R)
@@ -131,7 +136,7 @@ export function valueText(sys, id) {
   if (c.k === 'pb') return v ? 'ON (in)' : 'OFF (out)';
   if (c.k === 'gpb') return (sys.sw[c.guard] ? 'guard open, ' : 'guard closed, ') + (v ? 'pushed' : 'normal');
   if (c.k === 'master') return v ? 'ON' : 'OFF';
-  if (c.labels) return c.labels[c.pos.indexOf(v)] ?? String(v);
+  if (c.labels) return c.labels[c.pos.indexOf(v)] ?? (typeof v === 'number' && c.k === 'lever' ? c.labels[Math.round(v)] + ` (${v.toFixed(2)})` : String(v));
   return String(v);
 }
 
@@ -163,7 +168,9 @@ export function operate(sys, id, how) {
     case 'avp': return avPress(sys, c.press) ? { did: 'mom', sound: 'key' } : { did: 'mom', sound: 'key' };
     case 'sel': sys.setSwitch(c.sw, c.toggle && w[c.sw] === c.val ? null : c.val); return { did: 'pb', sound: 'pb' };
     case 'rot': case 'tog': case 'lever': case 'stick': {
-      const i = c.pos.indexOf(w[c.sw]); let j;
+      let i = c.pos.indexOf(w[c.sw]), j;
+      if (i < 0 && typeof w[c.sw] === 'number') { const v = w[c.sw]; i = how === 1 ? Math.floor(v) : how === -1 ? Math.ceil(v) : Math.round(v); } // between detents (thrust levers)
+      if (to !== undefined && typeof to === 'number' && c.pos.indexOf(to) < 0 && c.k === 'lever' && typeof c.pos[0] === 'number') { sys.setSwitch(c.sw, Math.max(c.pos[0], Math.min(c.pos[c.pos.length - 1], to))); return { did: 'lever', sound: 'lever' }; }
       if (to !== undefined) j = c.pos.indexOf(to);
       else if (how === 1 || how === -1) j = i + how;
       else j = i + 1 >= c.pos.length ? 0 : i + 1;

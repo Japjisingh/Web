@@ -102,8 +102,8 @@ srv.listen(0, async () => {
     // ---------------- FCU, EFIS, radios, transponder on the displays ----------------
     h.setScenario('start'); refresh();
     const hd0 = hash('pfd');
-    h.knob('hdgKnob', 'set', 279); h.knob('hdgKnob', 'pull'); refresh();
-    check(count('pfd', 262, 362, 288, 380, cyan) > 15 && h.state().av.fcu.hdgMan === false, 'FCU heading 279 pulled: cyan heading bug on the PFD heading tape');
+    h.knob('hdgKnob', 'set', 314); h.knob('hdgKnob', 'pull'); refresh();
+    check(count('pfd', 262, 362, 288, 380, cyan) > 15 && h.state().av.fcu.hdgMan === false, 'FCU heading 314 pulled (aircraft heading 309): cyan heading bug on the PFD heading tape');
     check(count('nd', 0, 60, 512, 440, cyan) > count('nd', 0, 0, 1, 1, cyan), 'heading bug on the ND');
     h.knob('spdKnob', 'set', 160); h.knob('spdKnob', 'pull'); refresh(); check(count('pfd', 60, 88, 104, 108, cyan) > 20, 'selected speed 160 shown in cyan above the speed tape');
     check(count('pfd', 380, 88, 426, 108, mag) > 20, 'selected altitude (managed: magenta) above the altitude tape'); h.knob('altKnob', 'pull'); refresh(); check(count('pfd', 380, 88, 426, 108, cyan) > 20, 'selected altitude pulled: cyan');
@@ -126,6 +126,50 @@ srv.listen(0, async () => {
     for (const pg of ['PRESS', 'COND', 'DOOR', 'WHEEL', 'FCTL', 'STS']) { A('sd' + pg); refresh(); const lit = count('sd', 10, 10, 240, 44, (r, g, b) => r + g + b > 500); check(s().sdPage === pg && lit > 40, `SYSTEMS page ${pg} drawn`); pages.add(hash('sd')); }
     check(pages.size === 6, 'six distinct pages');
     A('stickL'); A('stickL'); A('stickL'); A('sdFCTL'); check(h.sys.sw.stickL === 'LEFT', 'sidestick at full left (flight control check)');
+    // ---------------- Taxi and take-off, driven through host.__jet ----------------
+    h.setScenario('taxi'); h.setMode('practice'); h.setScenario('taxi');
+    const Lx = h.layout, F = () => h.fdm, wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+    const step = (sec, each) => { const n = Math.round(sec / 0.1); for (let i = 0; i < n; i++) { if (each && each() === true) return true; h.advance(0.1); } return false; };
+    const inp = o => h.input(o);
+    function drive(tgtKt, stopAtHold) {
+      const fd = F(), sn = Lx.toSN(fd.x, fd.z), nr = Lx.nearest(Lx.TAXI_PATH, sn.s, sn.n); let k = nr.i, acc = 0;
+      while (k < Lx.TAXI_PATH.length - 1 && acc < 16 + fd.gs * 0.6) { acc += Math.hypot(Lx.TAXI_PATH[k + 1].s - Lx.TAXI_PATH[k].s, Lx.TAXI_PATH[k + 1].n - Lx.TAXI_PATH[k].n); k++; }
+      const pt = Lx.TAXI_PATH[k], err = wrap(Math.atan2(pt.n - sn.n, pt.s - sn.s) - (Lx.YAW_RWY - fd.yaw));
+      let tgt = Math.abs(err) > 0.25 ? 9 : tgtKt; const nose = h.sys.st.mon.nose;
+      if (stopAtHold && Math.abs(nose.s - Lx.HOLD.s) < 30 && nose.n > Lx.HOLD.n - 40) tgt = nose.n > Lx.HOLD.n - 9 ? 0 : 6;
+      const L = fd.gs < tgt - 1 ? (fd.gs < 3 ? 0.32 : 0.2) : 0; h.sys.setSwitch('thr1', L); h.sys.setSwitch('thr2', L);
+      const b = fd.gs > tgt + 2 || tgt === 0 ? (tgt === 0 ? 0.7 : 0.3) : 0; inp({ tiller: Math.max(-1, Math.min(1, err * 2.2)), brakeL: b, brakeR: b });
+    }
+    A('parkBrk', false); A('push'); step(70, () => F().push && F().push.gone);
+    check(F().push && F().push.gone && Math.abs(F().hdg - 4) < 6, `pushback with the tug: heading ${Math.round(F().hdg)}, flow at ${h.flow.current().id}`);
+    A('parkBrk', true); A('flaps', 1); A('spdBrk', 1); A('autoBrkMax');
+    for (const [p2, r2] of [[1, 0], [-1, 0], [0, -1], [0, 1], [0, 0]]) { inp({ pitch: p2, roll: r2 }); h.advance(2); }
+    A('toConfig'); A('parkBrk', false);
+    check(h.flow.current().id === 'taxiHold', 'before taxi: flaps 1, spoilers armed, autobrake MAX, flight controls checked, T.O CONFIG normal');
+    step(320, () => { drive(16, true); return h.sys.st.mon.atHold && h.sys.st.mon.held > 1; });
+    check(h.sys.st.mon.atHold && !h.sys.st.mon.stopBarRun && h.sys.st.mon.taxiMax < 30, `taxied to the stop bar and stopped (max ${f1(h.sys.st.mon.taxiMax)} kt)`);
+    step(6, () => h.sys.st.mon.cleared); check(!h.sys.st.stopBar, 'stop bar out: cleared to line up');
+    for (const [id, v] of [['strobe', 2], ['landL', 2], ['landR', 2], ['nose', 2], ['xpdr', 2]]) A(id, v);
+    step(140, () => { drive(10, false); const sn = Lx.toSN(F().x, F().z); if (h.sys.st.mon.lined && sn.s > -515) { inp({ brakeL: 1, brakeR: 1 }); h.sys.setSwitch('thr1', 0); h.sys.setSwitch('thr2', 0); } return h.sys.st.mon.lined && F().gs < 0.5; });
+    inp({}); A('chrono'); refresh();
+    check(h.flow.current().id === 'thrustSet' && h.af.vert === 'SRS' && h.af.lat === 'RWY', `lined up; FMA on the ground: ${h.af.vert} | ${h.af.lat}, armed ${h.af.vertArm} ${h.af.latArm}`);
+    A('thr1', 2); A('thr2', 2); h.advance(1); refresh();
+    check(h.af.thr === 'MAN FLX +45' && h.sys.sw.athr, 'take-off thrust: FMA MAN FLX +45, A/THR armed');
+    const pfd0 = hash('pfd'); step(60, () => { const fd = F(); inp({ rudder: Math.max(-1, Math.min(1, -(Lx.toSN(fd.x, fd.z).n - Lx.RWY.n) * 0.15 - wrap((fd.hdg - 274) * Math.PI / 180) * 3)) }); return fd.ias > 120; }); refresh();
+    check(F().ias > 118 && hash('pfd') !== pfd0 && count('pfd', 46, 112, 116, 348, (r, g, b) => r > 200 && g > 200 && b > 200) > 30, `take-off roll at ${Math.round(F().ias)} kt: speed tape moving, callouts ${Object.keys(h.sys.st.callouts).join(', ')}`);
+    step(60, () => { const fd = F(); inp({ pitch: fd.ias >= 140 && fd.pitch < 15 * Math.PI / 180 ? 0.6 : 0, rudder: fd.onGround ? Math.max(-1, Math.min(1, -(Lx.toSN(fd.x, fd.z).n - Lx.RWY.n) * 0.15)) : 0 }); return fd.ra > 60; });
+    inp({}); h.advance(3); A('gear', 'UP'); h.advance(1); A('ap1'); h.advance(2); refresh();
+    check(h.sys.sw.ap1 && h.af.vert === 'SRS' && h.af.lat === 'NAV', `after lift-off: AP1 on, FMA ${h.af.thr} | ${h.af.vert} | ${h.af.lat}; RA ${Math.round(F().ra)} ft`);
+    step(90, () => h.af.thr === 'LVR CLB'); check(h.af.thr === 'LVR CLB', `LVR CLB at ${Math.round(F().alt)} ft`);
+    A('thr1', 1); A('thr2', 1); h.advance(2); check(h.af.athrActive && h.af.thr === 'THR CLB' && h.af.vert === 'CLB', `A/THR active: ${h.af.thr} | ${h.af.vert}`);
+    step(60, () => F().ias > 200); A('flaps', 0); step(240, () => h.flow.finished);
+    r = h.result(); check(h.flow.finished && r.score >= 90 && h.af.vert === 'ALT', `Taxi and take-off finished at ${Math.round(F().alt)} ft (FMA ${h.af.thr} | ${h.af.vert}): score ${r.score}; ${r.notes.join(' · ')}`);
+    // ---------------- rejected take-off ----------------
+    h.setScenario('rto');
+    A('thr1', 2); A('thr2', 2); step(60, () => h.sys.st.rtoInject.fired); h.advance(1.5); A('thr1', 0); A('thr2', 0);
+    check(F().abActive && F().spoiler > 0.3, `RTO: warning at ${Math.round(h.sys.st.mon.reject ? h.sys.st.mon.reject.ias : 0)} kt, levers idle: autobrake RTO, ground spoilers`);
+    step(60, () => F().gs < 0.4); A('parkBrk', true); h.confirm(); h.advance(0.5); r = h.result();
+    check(h.flow.finished && r.score >= 90 && h.sys.st.mon.stopRemain && h.sys.st.mon.stopRemain.on, `RTO stopped on the runway (${Math.round(h.sys.st.mon.stopRemain.s)} m remaining), score ${r.score}: ${r.notes.join(' · ')}`);
     // ---------------- order errors ----------------
     h.setScenario('prep'); A('batV1'); A('bat2', true); A('bat1', true); A('pack1', false); h.flow.finish(); r = h.result();
     check(r.late.length === 1 && r.wrong.length === 1 && r.missed.length > 0, `debrief flags out-of-order (${r.late.map(x => x.id)}), not-in-flow (${r.wrong.map(w => w.ctl)}) and missed (${r.missed.length})`);
@@ -143,6 +187,15 @@ srv.listen(0, async () => {
   await p.mouse.move(pt.x, pt.y); await p.mouse.down(); for (let i = 1; i <= 5; i++) await p.mouse.move(pt.x, pt.y - i * 10); await p.mouse.up(); await p.waitForTimeout(300); f = await F();
   chk(f.alt === a0 + 4000 && f.altMan, `pointer: dragging up 50 px turns it three detents (${f.alt}), no push`);
   console.log(out2.join('\n'));
+  // ---------------- touch controls at phone width ----------------
+  const pp = await (await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true })).newPage();
+  pp.on('pageerror', e => errs.push('PAGEERR ' + e.message));
+  await pp.goto(`http://localhost:${srv.address().port}/_t.html`); await pp.evaluate(() => document.querySelector('#p-jet').scrollIntoView()); await pp.waitForFunction(() => document.querySelector('#p-jet').__jet, null, { timeout: 120000 }); await pp.waitForTimeout(1500);
+  const tc = await pp.evaluate(() => { const h = document.querySelector('#p-jet').__jet; h.setScenario('taxi'); const el = h.hud.root.querySelector('.jh-fly'); const r = el.getBoundingClientRect(), wr = h.S.renderer.domElement.getBoundingClientRect(); return { on: el.classList.contains('on'), w: wr.width, inside: r.left >= wr.left - 1 && r.right <= wr.right + 1 && r.width > 200, parts: ['.pad', '.thr', '.til', '.brk'].every(q => el.querySelector(q).getBoundingClientRect().width > 20), scroll: document.documentElement.scrollWidth }; });
+  chk(tc.on && tc.inside && tc.parts && tc.w < 600 && tc.scroll <= 390, `touch controls on a ${Math.round(tc.w)} px stage: stick, thrust, tiller, brake (page width ${tc.scroll})`);
+  const box2 = await pp.evaluate(() => { const el = document.querySelector('#p-jet').__jet.hud.root.querySelector('.jh-fly .brk').getBoundingClientRect(); return { x: el.left + el.width / 2, y: el.top + el.height / 2 }; });
+  await pp.touchscreen.tap(box2.x, box2.y); const brk = await pp.evaluate(() => document.querySelector('#p-jet').__jet.inputs.touch.brake);
+  chk(brk === 0, 'brake button releases after a tap'); console.log(out2.slice(-2).join('\n'));
   res.ok = res.ok && ok2;
   console.log(res.out.join('\n')); console.log(res.ok ? 'ALL BROWSER LOGIC TESTS PASSED' : 'SOME FAILED');
   console.log('console errors/warnings:', JSON.stringify(errs));

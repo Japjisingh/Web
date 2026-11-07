@@ -1,6 +1,7 @@
 /* Canvas-drawn flight deck displays for the generic twin-jet trainer. Generic layouts and our own wording. */
 import { fmtT, REF, OAT } from './systems.js';
 import { AIRPORTS, VORS, NDBS, WPTS, AC, routePoints, brg, dist } from './navdata.js';
+import { toEN, P as LP, TWY, HOLD, RWY as RWYL, WIND } from './layout.js';
 import { baroAlt, baroText, fmsStatus } from './avionics.js';
 
 const F = '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace';
@@ -17,92 +18,107 @@ function flag(x, t, X, Y, size = 26) { txt(x, t, X, Y, C.r, size, 'center', 700)
 
 /* ---------------- PFD ---------------- */
 const wrap180 = d => ((d % 360) + 540) % 360 - 180;
+const vsY = v => { const a = Math.abs(v), y = a <= 1000 ? a / 1000 * 30 : a <= 2000 ? 30 + (a - 1000) / 1000 * 25 : 55 + Math.min(1, (a - 2000) / 4000) * 25; return -Math.sign(v) * y; };
 export function drawPFD(x, N, sys, side = 0) {
-  blank(x, N); const s = sys.st, w = sys.sw, av = s.av, Fc = av.fcu, fm = av.fms, sd = side ? 'R' : 'L';
+  blank(x, N); const s = sys.st, w = sys.sw, av = s.av, Fc = av.fcu, fm = av.fms, sd = side ? 'R' : 'L', Fd = s.fdm, A = s.af;
   const ir = s.irs[side === 0 ? 0 : 1];
   const adr = ir.mode !== 'OFF';
   const att = ir.att, hdgOk = ir.aligned || false;
   const k = N / 512; x.save(); x.scale(k, k);
-  // flight mode annunciator: five columns (generic, our own layout)
+  // flight mode annunciator: thrust | vertical | lateral | approach | AP / FD / A/THR (generic, simplified)
   for (const X of [104, 196, 288, 380]) ln(x, [[X, 8], [X, 62]], C.grey, 2);
   const fdOn = w['fd' + sd], anyFd = w.fdL || w.fdR, ap = w.ap1 || w.ap2;
   const apT = w.ap1 && w.ap2 ? 'AP1+2' : w.ap1 ? 'AP1' : w.ap2 ? 'AP2' : '';
   if (apT) txt(x, apT, 442, 18, C.w, 16, 'center', 700);
   if (anyFd) txt(x, `${w.fdL ? '1' : '-'} FD ${w.fdR ? '2' : '-'}`, 442, 36, C.w, 16, 'center', 700);
-  if (w.athr) txt(x, 'A/THR', 442, 54, C.c, 16, 'center', 700);
+  if (w.athr) txt(x, 'A/THR', 442, 54, A.athrActive ? C.w : C.c, 16, 'center', 700);
+  if (A.thr) { const fl = A.thr === 'LVR CLB'; if (!fl || Math.floor(sys.t * 2) % 2 === 0) { txt(x, A.thr, 56, A.thr.startsWith('MAN') ? 22 : 18, A.thr.startsWith('MAN') ? C.w : fl ? C.w : C.g, A.thr.length > 7 ? 13 : 15, 'center', 700); if (A.thr.startsWith('MAN')) { const tw = Math.min(92, A.thr.length * 8.6); box(x, 56 - tw / 2 - 3, 10, tw + 6, 24, C.w, 1.5); } if (fl) box(x, 12, 8, 88, 22, C.w, 1.5); } }
+  else if (anyFd && w.athr && !Fc.spdMan) txt(x, 'SPEED', 56, 18, C.g, 16, 'center', 700);
   if (anyFd || ap) {
-    if (w.athr && !Fc.spdMan) txt(x, 'SPEED', 56, 18, C.g, 16, 'center', 700);
-    if (Fc.vsMode) txt(x, Fc.trk ? `FPA ${Fc.fpa >= 0 ? '+' : ''}${Fc.fpa.toFixed(1)}` : `V/S ${Fc.vs >= 0 ? '+' : ''}${Fc.vs}`, 150, 18, C.g, 15, 'center', 700);
-    if (w.appr) txt(x, 'G/S', 150, 38, C.c, 16, 'center', 700); else if (Fc.vsMode) txt(x, 'ALT', 150, 38, C.c, 16, 'center', 700);
-    if (!Fc.hdgMan) txt(x, Fc.trk ? 'TRK' : 'HDG', 242, 18, C.g, 16, 'center', 700);
-    if (w.loc || w.appr) txt(x, 'LOC', 242, 38, C.c, 16, 'center', 700); else if (Fc.hdgMan && fm.from && fm.to) txt(x, 'NAV', 242, 38, C.c, 16, 'center', 700);
+    const v = A.vert === 'V/S' ? (Fc.trk ? `FPA ${Fc.fpa >= 0 ? '+' : ''}${Fc.fpa.toFixed(1)}` : `V/S ${Fc.vs >= 0 ? '+' : ''}${Fc.vs}`) : A.vert;
+    if (v) txt(x, v, 150, 18, C.g, v.length > 6 ? 13 : 16, 'center', 700);
+    if (A.vertArm) txt(x, A.vertArm, 150, 38, C.c, 15, 'center', 700);
+    if (A.lat) txt(x, A.lat, 242, 18, C.g, A.lat.length > 4 ? 14 : 16, 'center', 700);
+    if (A.latArm) txt(x, A.latArm, 242, 38, C.c, 15, 'center', 700); else if (w.loc || w.appr) txt(x, 'LOC', 242, 38, C.c, 16, 'center', 700);
     if (w.appr) txt(x, 'APPR', 334, 18, C.c, 15, 'center', 700);
     if (w.exped) txt(x, 'EXPED', 334, 38, C.g, 14, 'center', 700);
   }
-  // attitude
-  const cx = 240, cy = 230, pitch = 0.6, bank = 0;
+  // attitude: live pitch and bank, flight director, flight path vector
+  const cx = 240, cy = 230, pitch = Fd.pitch * 180 / Math.PI + 0.6, bank = Fd.roll * 180 / Math.PI, pp = 4.2;
   x.save(); x.beginPath(); x.roundRect(146, 112, 188, 236, 26); x.clip();
   if (att) {
-    x.translate(cx, cy); x.rotate(-bank * D2R); const pp = 4.2; // px per degree
-    x.fillStyle = C.sky; x.fillRect(-300, -600 + pitch * pp, 600, 600); x.fillStyle = C.gnd; x.fillRect(-300, pitch * pp, 600, 600);
-    ln(x, [[-300, pitch * pp], [300, pitch * pp]], C.w, 2);
-    for (let p = -30; p <= 30; p += 2.5) { if (!p) continue; const Y = (pitch - p) * pp, L = p % 10 === 0 ? 46 : p % 5 === 0 ? 26 : 12; ln(x, [[-L, Y], [L, Y]], C.w, 2); if (p % 10 === 0) { txt(x, String(Math.abs(p)), -L - 16, Y, C.w, 15); txt(x, String(Math.abs(p)), L + 16, Y, C.w, 15); } }
+    x.translate(cx, cy); x.rotate(-bank * D2R);
+    x.fillStyle = C.sky; x.fillRect(-400, -800 + pitch * pp, 800, 800); x.fillStyle = C.gnd; x.fillRect(-400, pitch * pp, 800, 800);
+    ln(x, [[-400, pitch * pp], [400, pitch * pp]], C.w, 2);
+    for (let p = -30; p <= 30; p += 2.5) { if (!p) continue; const Y = (pitch - p) * pp, L = p % 10 === 0 ? 46 : p % 5 === 0 ? 26 : 12; if (Math.abs(Y) > 150) continue; ln(x, [[-L, Y], [L, Y]], C.w, 2); if (p % 10 === 0) { txt(x, String(Math.abs(p)), -L - 16, Y, C.w, 15); txt(x, String(Math.abs(p)), L + 16, Y, C.w, 15); } }
   } else { x.fillStyle = '#000'; x.fillRect(0, 0, 512, 512); }
   x.restore();
   if (att) {
-    // bank scale + pointer
     x.save(); x.translate(cx, cy); for (const a of [-45, -30, -20, -10, 0, 10, 20, 30, 45]) { const r1 = 112, r2 = a % 30 === 0 || a === 0 ? 124 : 118; ln(x, [[Math.sin(a * D2R) * r1, -Math.cos(a * D2R) * r1], [Math.sin(a * D2R) * r2, -Math.cos(a * D2R) * r2]], C.w, 2); }
-    x.fillStyle = C.y; x.beginPath(); x.moveTo(0, -110); x.lineTo(-8, -98); x.lineTo(8, -98); x.closePath(); x.fill(); x.restore();
-    // flight director bars (centred: no flight path to follow on the ground)
-    if (fdOn) { x.lineCap = 'round'; ln(x, [[cx - 64, cy - 6], [cx + 64, cy - 6]], '#0a0a0a', 7); ln(x, [[cx - 64, cy - 6], [cx + 64, cy - 6]], C.g, 4); ln(x, [[cx + 4, cy - 70], [cx + 4, cy + 62]], '#0a0a0a', 7); ln(x, [[cx + 4, cy - 70], [cx + 4, cy + 62]], C.g, 4); x.lineCap = 'butt'; }
-    // aircraft symbol
+    x.fillStyle = C.y; x.beginPath(); x.moveTo(0, -126); x.lineTo(-8, -138); x.lineTo(8, -138); x.closePath(); x.fill();
+    x.rotate(-bank * D2R); x.beginPath(); x.moveTo(0, -110); x.lineTo(-8, -98); x.lineTo(8, -98); x.closePath(); x.fill(); x.restore();
+    if (fdOn && (anyFd)) { const py = clamp(-A.fdPitch * pp * 0.8, -70, 70), rx = clamp(A.fdRoll * 2.4, -64, 64); x.lineCap = 'round'; for (const [c, wd] of [['#0a0a0a', 7], [C.g, 4]]) { ln(x, [[cx - 64, cy - 6 + py], [cx + 64, cy - 6 + py]], c, wd); ln(x, [[cx + 4 + rx, cy - 70], [cx + 4 + rx, cy + 62]], c, wd); } x.lineCap = 'butt'; }
+    if (!Fd.onGround) { const drift = wrap180(Fd.trk - Fd.hdg), fx = cx + drift * pp, fy = cy + (Fd.pitch - Fd.gamma) * 180 / Math.PI * pp; x.strokeStyle = C.g; x.lineWidth = 3; x.beginPath(); x.arc(fx, fy, 8, 0, 7); x.stroke(); ln(x, [[fx - 22, fy], [fx - 8, fy]], C.g, 3); ln(x, [[fx + 8, fy], [fx + 22, fy]], C.g, 3); ln(x, [[fx, fy - 8], [fx, fy - 16]], C.g, 3); }
     x.fillStyle = '#000'; x.strokeStyle = C.y; x.lineWidth = 3;
     for (const sd2 of [-1, 1]) { x.beginPath(); x.rect(cx + sd2 * 34 - (sd2 > 0 ? 0 : 42), cy - 4, 42, 8); x.fill(); x.stroke(); }
     x.fillStyle = C.y; x.fillRect(cx - 5, cy - 5, 10, 10);
-    // landing system scales (no usable signal at the stand: localizer pegged, glide slope absent)
     if (w['ls' + sd]) {
       for (const d of [-60, -30, 30, 60]) { x.strokeStyle = C.w; x.lineWidth = 2; x.beginPath(); x.arc(cx + d, 336, 4, 0, 7); x.stroke(); x.beginPath(); x.arc(344, cy + d, 4, 0, 7); x.stroke(); }
       ln(x, [[cx, 328], [cx, 344]], C.y, 3); ln(x, [[338, cy], [350, cy]], C.y, 3);
       if (fm.depRwy === '27R') { x.fillStyle = C.m; x.beginPath(); x.moveTo(cx + 66, 336); x.lineTo(cx + 74, 330); x.lineTo(cx + 74, 342); x.closePath(); x.fill(); }
     }
+    // radio altitude below 2500 ft
+    if (Fd.ra < 2500 && s.elec.ac) { const r = Fd.ra < 50 ? Math.round(Fd.ra) : Fd.ra < 1000 ? Math.round(Fd.ra / 10) * 10 : Math.round(Fd.ra / 50) * 50; txt(x, String(r), cx, 318, Fd.ra < 400 && !Fd.onGround ? C.a : C.g, 20, 'center', 700); }
   } else flag(x, 'ATT', cx, cy, 30);
   if (w['ls' + sd]) { const tuned = fm.depRwy === '27R'; txt(x, 'ILS1', 8, 440, C.m, 15, 'left', 700); txt(x, tuned ? '109.90' : '---.--', 8, 458, C.m, 15, 'left'); if (tuned) txt(x, 'IZZA', 8, 476, C.m, 15, 'left'); }
-  // speed tape (on the ground below 30 kt: scale floor), target speed and take-off speeds
+  // speed tape: live airspeed (floor 30 kt), trend arrow, target, take-off speeds, flap / slat speed, maximum speed band
   x.fillStyle = '#3b4248'; x.fillRect(46, 112, 70, 236);
   if (adr) {
-    x.save(); x.beginPath(); x.rect(46, 112, 70, 236); x.clip();
-    const spd = 30, ppk = 3.4; for (let v = 30; v <= 120; v += 10) { const Y = cy - (v - spd) * ppk; ln(x, [[104, Y], [116, Y]], C.w, 2); if (v % 20 === 0) txt(x, String(v), 88, Y, C.w, 18, 'right'); }
-    x.restore(); ln(x, [[118, cy], [138, cy]], C.y, 4);
-    const selT = Fc.unit === 'SPD' ? String(Fc.spd) : '.' + String(Math.round(Fc.mach * 100)).padStart(2, '0');
-    if (!Fc.spdMan || Fc.prevSpd > 0) txt(x, selT, 81, 98, C.c, 19, 'center', 700);
-    else if (fm.v2) txt(x, String(fm.v2), 81, 98, C.m, 19, 'center', 700);
-    if (fm.v1 || fm.vr || fm.v2) {
+    const spd = Math.max(30, Fd.ias), ppk = 3.4, Y = v => cy - (v - spd) * ppk;
+    x.save(); x.beginPath(); x.rect(46, 112, 92, 236); x.clip();
+    for (let v = Math.floor((spd - 40) / 10) * 10; v <= spd + 40; v += 10) { if (v < 30) continue; ln(x, [[104, Y(v)], [116, Y(v)]], C.w, 2); if (v % 20 === 0) txt(x, String(v), 88, Y(v), C.w, 18, 'right'); }
+    const vm = A.vmax || 350; if (vm < spd + 40) { for (let v = vm; v < spd + 45; v += 4) { x.fillStyle = Math.floor((v - vm) / 4) % 2 ? '#000' : C.r; x.fillRect(110, Y(v + 4), 8, 4 * ppk); } }
+    const mk = (v, t, col) => { if (v && Math.abs(v - spd) < 34) { ln(x, [[116, Y(v)], [124, Y(v)]], col, 3); txt(x, t, 132, Y(v), col, 14, 'center', 700); } };
+    if (Fd.onGround || Fd.ra < 400) { mk(fm.v1, '1', C.c); mk(fm.vr, 'o', C.c); }
+    const sSpd = 200, fSpd = 162; if (Math.round(Fd.flap) === 1) mk(sSpd, 'S', C.g); else if (Fd.flap > 1.5) mk(fSpd, 'F', C.g);
+    const tgt = A.spdTgt || fm.v2, tc = !Fc.spdMan ? C.c : C.m;
+    if (tgt && Math.abs(tgt - spd) < 34) { x.fillStyle = tc; x.beginPath(); x.moveTo(117, Y(tgt)); x.lineTo(131, Y(tgt) - 8); x.lineTo(131, Y(tgt) + 8); x.closePath(); x.fill(); }
+    x.restore();
+    ln(x, [[118, cy], [138, cy]], C.y, 4);
+    const tr = (A.acc || 0) * 10; if (!Fd.onGround || Fd.gs > 10) if (Math.abs(tr) > 2) { const ty = cy - clamp(tr, -34, 34) * ppk; ln(x, [[124, cy], [124, ty]], C.y, 3); x.fillStyle = C.y; x.beginPath(); x.moveTo(124, ty - Math.sign(tr) * 6); x.lineTo(119, ty + Math.sign(tr) * 2); x.lineTo(129, ty + Math.sign(tr) * 2); x.closePath(); x.fill(); }
+    if (tgt && Math.abs(tgt - spd) >= 34) txt(x, String(Math.round(tgt)), 81, tgt > spd ? 98 : 362, tc, 19, 'center', 700);
+    if ((fm.v1 || fm.vr || fm.v2) && Fd.onGround && Fd.ias < 60) {
       x.fillStyle = '#15191c'; x.fillRect(48, 114, 66, 52);
       [['V1', fm.v1], ['VR', fm.vr], ['V2', fm.v2]].forEach(([l, v], i) => { if (!v) return; txt(x, l, 52, 124 + i * 16, C.c, 12, 'left', 700); txt(x, String(v), 112, 124 + i * 16, i === 2 ? C.m : C.c, 14, 'right', 700); });
     }
   } else flag(x, 'SPD', 81, cy);
-  // altitude tape: altitude follows the baro reference; selected altitude above the tape
+  // altitude tape: baro altitude, selected altitude, vertical speed
   x.fillStyle = '#3b4248'; x.fillRect(370, 112, 64, 236);
-  const altRaw = baroAlt(av, side), alt = Math.round(altRaw / 10) * 10;
+  const altRaw = baroAlt(av, side) + Fd.h / 0.3048, alt = Math.round(altRaw / 10) * 10;
   if (adr) {
-    x.save(); x.beginPath(); x.rect(370, 112, 64, 236); x.clip();
-    const ppf = 0.55; for (let a = Math.floor((alt - 500) / 100) * 100; a <= alt + 500; a += 100) { const Y = cy - (a - alt) * ppf; ln(x, [[370, Y], [382, Y]], C.w, 2); if (a % 500 === 0) txt(x, String(Math.max(0, a) / 100).padStart(2, '0'), 400, Y, C.w, 18, 'left'); }
+    const ppf = 0.55, AY = a => cy - (a - altRaw) * ppf;
+    x.save(); x.beginPath(); x.rect(358, 112, 76, 236); x.clip();
+    for (let a = Math.floor((altRaw - 500) / 100) * 100; a <= altRaw + 500; a += 100) { ln(x, [[370, AY(a)], [382, AY(a)]], C.w, 2); if (a % 500 === 0) txt(x, String(Math.max(0, a) / 100).padStart(2, '0'), 400, AY(a), C.w, 18, 'left'); }
+    if (Math.abs(Fc.alt - altRaw) < 210) { const y = AY(Fc.alt); x.strokeStyle = Fc.altMan ? C.m : C.c; x.lineWidth = 3; x.beginPath(); x.moveTo(362, y - 10); x.lineTo(372, y - 10); x.lineTo(372, y + 10); x.lineTo(362, y + 10); x.stroke(); }
     x.restore();
     x.fillStyle = '#000'; x.fillRect(372, cy - 18, 70, 36); box(x, 372, cy - 18, 70, 36, C.y, 2); txt(x, String(alt).padStart(5, ' '), 438, cy, C.g, 22, 'right', 700);
-    txt(x, String(Fc.alt), 402, 98, Fc.altMan ? C.m : C.c, 19, 'center', 700);
+    if (Math.abs(Fc.alt - altRaw) >= 210) txt(x, String(Fc.alt), 402, Fc.alt > altRaw ? 98 : 104, Fc.altMan ? C.m : C.c, 19, 'center', 700);
     const B = av.baro[side];
     if (B.std) { x.fillStyle = '#000'; x.fillRect(377, 357, 52, 24); box(x, 377, 357, 52, 24, C.y, 2); txt(x, 'STD', 403, 369, C.c, 18, 'center', 700); }
     else { const u = w['baroUnit' + sd]; txt(x, 'QNH', 403, 360, C.w, 13, 'center', 600); txt(x, baroText(av, side, u), 403, 379, C.c, 19, 'center', 700); }
   } else flag(x, 'ALT', 402, cy);
-  // vertical speed scale
   x.fillStyle = '#2f353a'; x.beginPath(); x.moveTo(448, 140); x.lineTo(482, 170); x.lineTo(482, 290); x.lineTo(448, 320); x.closePath(); x.fill();
-  if (adr) { for (const [v, Y] of [[0, cy], [1, cy - 30], [2, cy - 55], [6, cy - 80], [-1, cy + 30], [-2, cy + 55], [-6, cy + 80]]) { ln(x, [[452, Y], [462, Y]], C.w, 2); if (v && Math.abs(v) !== 1) txt(x, String(Math.abs(v)), 474, Y, C.w, 13); } ln(x, [[492, cy], [456, cy]], C.g, 3); } else flag(x, 'V/S', 466, cy, 18);
-  // heading tape with the selected-heading bug
+  if (adr) { for (const [v, Y] of [[0, cy], [1, cy - 30], [2, cy - 55], [6, cy - 80], [-1, cy + 30], [-2, cy + 55], [-6, cy + 80]]) { ln(x, [[452, Y], [462, Y]], C.w, 2); if (v && Math.abs(v) !== 1) txt(x, String(Math.abs(v)), 474, Y, C.w, 13); }
+    const vs = Fd.vs / 0.3048 * 60, vy = cy + vsY(vs); ln(x, [[496, cy], [458, vy]], Math.abs(vs) > 6000 ? C.a : C.g, 3);
+    if (Math.abs(vs) > 200) txt(x, String(Math.round(Math.abs(vs) / 100)).padStart(2, '0'), 470, vs > 0 ? 130 : 330, C.g, 15, 'center', 700);
+  } else flag(x, 'V/S', 466, cy, 18);
+  // heading tape: live heading, selected heading bug, track diamond
   x.fillStyle = '#3b4248'; x.fillRect(150, 376, 180, 40);
   if (hdgOk) {
-    const hdg = AC.hdg, pph = 7;
+    const hdg = Fd.hdg, pph = 7;
     x.save(); x.beginPath(); x.rect(150, 376, 180, 40); x.clip();
-    for (let h = 250; h <= 300; h += 5) { const X = 240 + (h - hdg) * pph; ln(x, [[X, 376], [X, h % 10 ? 384 : 390]], C.w, 2); if (h % 10 === 0) txt(x, String(h / 10).padStart(2, '0'), X, 402, C.w, 17); }
+    for (let h = Math.floor((hdg - 15) / 5) * 5; h <= hdg + 15; h += 5) { const X = 240 + (h - hdg) * pph, hh = ((h % 360) + 360) % 360; ln(x, [[X, 376], [X, hh % 10 ? 384 : 390]], C.w, 2); if (hh % 10 === 0) txt(x, String(hh / 10).padStart(2, '0'), X, 402, C.w, 17); }
+    if (Fd.gs > 3) { const tX = 240 + wrap180(Fd.trk - hdg) * pph; x.strokeStyle = C.g; x.lineWidth = 2; x.beginPath(); x.moveTo(tX, 378); x.lineTo(tX + 5, 384); x.lineTo(tX, 390); x.lineTo(tX - 5, 384); x.closePath(); x.stroke(); }
     x.restore(); ln(x, [[240, 370], [240, 392]], C.y, 4);
     if (!Fc.hdgMan || Fc.prevHdg > 0) {
       const d = wrap180(Fc.hdg - hdg);
@@ -124,9 +140,10 @@ export function drawND(x, N, sys, side = 0) {
   const mode = w['ndMode' + sd] || 'ARC', range = w['ndRange' + sd] || 10, ovl = w['ovl' + sd];
   const rose = mode === 'LS' || mode === 'VOR' || mode === 'NAV', plan = mode === 'PLAN', arc = mode === 'ARC';
   const k = N / 512; x.save(); x.scale(k, k);
-  txt(x, 'GS', 18, 22, C.w, 16, 'left'); txt(x, '0', 50, 22, C.g, 18, 'left'); txt(x, 'TAS', 82, 22, C.w, 16, 'left'); txt(x, '---', 122, 22, C.g, 18, 'left');
-  txt(x, '---/---', 18, 44, C.g, 16, 'left');
-  const cx = 256, cy = arc ? 440 : 272, R = arc ? 330 : 176, hdg = AC.hdg, sc = R / range;
+  const Fd = s.fdm, POS = toEN(Fd.x, Fd.z), tas = Fd.tas / 0.514444;
+  txt(x, 'GS', 18, 22, C.w, 16, 'left'); txt(x, String(Math.round(Fd.gs)), 50, 22, C.g, 18, 'left'); txt(x, 'TAS', 92, 22, C.w, 16, 'left'); txt(x, tas > 60 ? String(Math.round(tas)) : '---', 132, 22, C.g, 18, 'left');
+  txt(x, tas > 60 ? `${String(WIND.from).padStart(3, '0')}/${WIND.kt}` : '---/---', 18, 44, C.g, 16, 'left');
+  const cx = 256, cy = arc ? 440 : 272, R = arc ? 330 : 176, hdg = Math.round(Fd.hdg), sc = R / range;
   txt(x, `${ND_NAME[mode]}  ${range}`, 500, 498, C.grey, 13, 'right', 600);
   if (!ir.aligned) {
     x.strokeStyle = C.r; x.lineWidth = 2; x.beginPath(); if (arc) x.arc(cx, cy, R, Math.PI * 1.17, Math.PI * 1.83); else x.arc(cx, cy, R, 0, 7); x.stroke();
@@ -135,7 +152,7 @@ export function drawND(x, N, sys, side = 0) {
     x.restore(); return;
   }
   const h = hdg * D2R;
-  const proj = p => { const de = p.e - AC.e, dn = p.n - AC.n; if (plan) return [cx + de * sc, cy - dn * sc]; const right = de * Math.cos(h) - dn * Math.sin(h), fwd = de * Math.sin(h) + dn * Math.cos(h); return [cx + right * sc, cy - fwd * sc]; };
+  const proj = p => { const de = p.e - POS.e, dn = p.n - POS.n; if (plan) return [cx + de * sc, cy - dn * sc]; const right = de * Math.cos(h) - dn * Math.sin(h), fwd = de * Math.sin(h) + dn * Math.cos(h); return [cx + right * sc, cy - fwd * sc]; };
   const pts = routePoints(fm);
   // compass
   x.save();
@@ -155,10 +172,12 @@ export function drawND(x, N, sys, side = 0) {
   // map content (clipped)
   x.beginPath(); x.arc(cx, cy, R - 1, 0, 7); x.clip(); if (arc) { x.beginPath(); x.rect(0, 58, 512, 420); x.clip(); }
   const vis = ([X, Y]) => X > -40 && X < 552 && Y > -40 && Y < 552;
-  if (ovl === 'ARPT') for (const [id, a] of Object.entries(AIRPORTS)) { const q = proj(a); if (!vis(q)) continue; star(x, q[0], q[1], 9, C.m); if (Math.hypot(q[0] - (plan ? proj(AC)[0] : cx), q[1] - (plan ? proj(AC)[1] : cy)) > 30) txt(x, id, q[0] + 13, q[1] - 10, C.m, 14, 'left'); }
+  if (ovl === 'ARPT') for (const [id, a] of Object.entries(AIRPORTS)) { const q = proj(a); if (!vis(q)) continue; star(x, q[0], q[1], 9, C.m); if (Math.hypot(q[0] - (plan ? proj(POS)[0] : cx), q[1] - (plan ? proj(POS)[1] : cy)) > 30) txt(x, id, q[0] + 13, q[1] - 10, C.m, 14, 'left'); }
   if (ovl === 'VORD') for (const v of VORS) { const q = proj(v); if (!vis(q)) continue; x.strokeStyle = C.c; x.lineWidth = 2; x.beginPath(); x.arc(q[0], q[1], 8, 0, 7); x.stroke(); x.fillStyle = C.c; x.fillRect(q[0] - 2, q[1] - 2, 4, 4); txt(x, v.id, q[0] + 12, q[1] - 10, C.c, 14, 'left'); }
   if (ovl === 'NDB') for (const v of NDBS) { const q = proj(v); if (!vis(q)) continue; x.strokeStyle = C.m; x.lineWidth = 2; x.beginPath(); x.moveTo(q[0], q[1] - 9); x.lineTo(q[0] - 8, q[1] + 6); x.lineTo(q[0] + 8, q[1] + 6); x.closePath(); x.stroke(); txt(x, v.id, q[0] + 12, q[1] - 8, C.m, 14, 'left'); }
   if (ovl === 'WPT') for (const v of WPTS) { const q = proj(v); if (!vis(q)) continue; x.strokeStyle = C.m; x.lineWidth = 2; x.beginPath(); x.moveTo(q[0], q[1] - 7); x.lineTo(q[0] + 7, q[1]); x.lineTo(q[0], q[1] + 7); x.lineTo(q[0] - 7, q[1]); x.closePath(); x.stroke(); txt(x, v.id, q[0] + 11, q[1] - 9, C.m, 13, 'left'); }
+  // taxiways of the departure airport (ranges up to 20 NM) and runways
+  if (range <= 20) { const tw = (s0, n0, s1, n1) => { const a = LP(s0, n0), b = LP(s1, n1), ea = toEN(a.x, a.z), eb = toEN(b.x, b.z); ln(x, [proj(ea), proj(eb)], '#56616a', Math.max(2, 23 / 1852 * sc)); }; tw(TWY.s0, TWY.n, TWY.s1, TWY.n); tw(HOLD.s, TWY.n, HOLD.s, RWYL.n); }
   // runways of the departure airport (always) and destination
   for (const [ap, rw] of [[fm.from || 'ZZAA', fm.depRwy], [fm.to, fm.arrRwy]]) {
     const A = AIRPORTS[ap]; if (!A) continue;
@@ -168,26 +187,26 @@ export function drawND(x, N, sys, side = 0) {
   if (pts.length > 1) {
     const P = pts.map(proj);
     x.strokeStyle = C.g; x.lineWidth = 3; x.beginPath(); P.forEach((q, i) => i ? x.lineTo(q[0], q[1]) : x.moveTo(q[0], q[1])); x.stroke();
-    x.setLineDash([10, 8]); ln(x, [proj(AC), P[0]], C.g, 2); x.setLineDash([]);
+    x.setLineDash([10, 8]); ln(x, [proj(POS), P[0]], C.g, 2); x.setLineDash([]);
     pts.forEach((p, i) => { const q = P[i]; if (!vis(q) || p.rwy) return; star(x, q[0], q[1], 10, i === 1 ? C.w : C.g); txt(x, p.id, q[0] + 14, q[1] - 12, i === 1 ? C.w : C.g, 15, 'left'); if (ovl === 'CSTR' && p.cstr) txt(x, p.cstr, q[0] + 14, q[1] + 8, C.m, 14, 'left'); });
-    const acq = plan ? proj(AC) : [cx, cy];
+    const acq = plan ? proj(POS) : [cx, cy];
     for (const p of pts) if (p.rwy) { const q = proj(p); if (vis(q) && Math.hypot(q[0] - acq[0], q[1] - acq[1]) > 40) txt(x, p.id, q[0] + 10, q[1] + 16, C.w, 14, 'left'); }
   }
   // bearing pointers 1 (single line) and 2 (double line)
   if (!plan) for (const n of [1, 2]) {
     const sel = w[`adf${n}${sd}`]; if (sel === 'OFF') continue;
     const st = sel === 'VOR' ? VORS[n === 1 ? 0 : 2] : NDBS[n === 1 ? 0 : 1];
-    const a = (brg(AC, st) - hdg) * D2R, col = sel === 'VOR' ? C.w : C.g, r1 = R * 0.95;
+    const a = (brg(POS, st) - hdg) * D2R, col = sel === 'VOR' ? C.w : C.g, r1 = R * 0.95;
     const tip = [cx + Math.sin(a) * r1, cy - Math.cos(a) * r1], tail = [cx - Math.sin(a) * r1, cy + Math.cos(a) * r1];
     if (n === 1) ln(x, [tail, tip], col, 2); else { const o = [Math.cos(a) * 3, Math.sin(a) * 3]; ln(x, [[tail[0] - o[0], tail[1] - o[1]], [tip[0] - o[0], tip[1] - o[1]]], col, 2); ln(x, [[tail[0] + o[0], tail[1] + o[1]], [tip[0] + o[0], tip[1] + o[1]]], col, 2); }
   }
   x.restore();
-  if (!plan) for (const n of [1, 2]) { const sel = w[`adf${n}${sd}`]; if (sel === 'OFF') continue; const st = sel === 'VOR' ? VORS[n === 1 ? 0 : 2] : NDBS[n === 1 ? 0 : 1]; const col = sel === 'VOR' ? C.w : C.g; const X = n === 1 ? 14 : 380; txt(x, `${sel}${n}`, X, 462, col, 15, 'left', 700); txt(x, `${st.id}  ${dist(AC, st).toFixed(1)}`, X, 480, col, 14, 'left'); }
+  if (!plan) for (const n of [1, 2]) { const sel = w[`adf${n}${sd}`]; if (sel === 'OFF') continue; const st = sel === 'VOR' ? VORS[n === 1 ? 0 : 2] : NDBS[n === 1 ? 0 : 1]; const col = sel === 'VOR' ? C.w : C.g; const X = n === 1 ? 14 : 380; txt(x, `${sel}${n}`, X, 462, col, 15, 'left', 700); txt(x, `${st.id}  ${dist(POS, st).toFixed(1)}`, X, 480, col, 14, 'left'); }
   // course pointer and deviation for ROSE LS / ROSE VOR
   if (mode === 'LS' || mode === 'VOR') {
     const ils = mode === 'LS', col = ils ? C.m : C.c, crs = 274, a = (crs - hdg) * D2R;
     let dev;
-    if (ils) { const L = AIRPORTS.ZZAA.rwys['27R']; dev = wrap180(brg(AC, { e: L.b[0], n: L.b[1] }) - crs) / 1.25; } else dev = wrap180(brg(VORS[0], AC) - crs) / 5;
+    if (ils) { const L = AIRPORTS.ZZAA.rwys['27R']; dev = wrap180(brg(POS, { e: L.b[0], n: L.b[1] }) - crs) / 1.25; } else dev = wrap180(brg(VORS[0], POS) - crs) / 5;
     dev = clamp(dev, -2.3, 2.3);
     x.save(); x.translate(cx, cy); x.rotate(a);
     ln(x, [[0, -R + 6], [0, -R * 0.42]], col, 4); ln(x, [[0, R * 0.42], [0, R - 6]], col, 4); x.fillStyle = col; x.beginPath(); x.moveTo(0, -R + 2); x.lineTo(-9, -R + 20); x.lineTo(9, -R + 20); x.closePath(); x.fill();
@@ -204,11 +223,12 @@ export function drawND(x, N, sys, side = 0) {
     else txt(x, String(Fc.hdg).padStart(3, '0'), d < 0 ? 40 : 472, 96, C.c, 18, 'center', 700);
   }
   // lubber line, aircraft symbol, heading readout, next waypoint
-  if (!plan) { ln(x, [[cx, cy - R - 20], [cx, cy - R + 6]], C.y, 4); txt(x, 'HDG', 214, 22, C.g, 16); txt(x, String(hdg).padStart(3, '0'), 256, 22, C.g, 20, 'center', 700); }
-  const ac = plan ? proj(AC) : [cx, cy];
+  if (!plan) { ln(x, [[cx, cy - R - 20], [cx, cy - R + 6]], C.y, 4); txt(x, Fd.gs > 3 ? 'TRK' : 'HDG', 214, 44, C.g, 14); txt(x, String(Math.round(Fd.gs > 3 ? Fd.trk : Fd.hdg) % 360).padStart(3, '0'), 256, 44, C.g, 18, 'center', 700);
+    if (Fd.gs > 3) { const ta = wrap180(Fd.trk - Fd.hdg) * D2R; x.save(); x.translate(cx + Math.sin(ta) * R, cy - Math.cos(ta) * R); x.rotate(ta); x.strokeStyle = C.g; x.lineWidth = 2.5; x.beginPath(); x.moveTo(0, -9); x.lineTo(6, 0); x.lineTo(0, 9); x.lineTo(-6, 0); x.closePath(); x.stroke(); x.restore(); } }
+  const ac = plan ? proj(POS) : [cx, cy];
   x.save(); x.translate(ac[0], ac[1]); if (plan) x.rotate(hdg * D2R);
   ln(x, [[-26, -6], [26, -6]], C.y, 4); ln(x, [[0, -24], [0, 22]], C.y, 4); ln(x, [[-10, 16], [10, 16]], C.y, 4); x.restore();
-  if (pts.length > 1) { const nx = pts[1]; txt(x, nx.id, 380, 22, C.w, 16, 'left', 700); txt(x, String(Math.round(brg(AC, nx))).padStart(3, '0') + '°', 500, 22, C.g, 16, 'right'); txt(x, dist(AC, nx).toFixed(1), 470, 44, C.g, 17, 'right', 700); txt(x, 'NM', 500, 44, C.c, 13, 'right'); }
+  if (pts.length > 1) { const nx = pts[Math.max(1, Math.min(pts.length - 1, s.af.legI || 1))]; txt(x, nx.id, 380, 22, C.w, 16, 'left', 700); txt(x, String(Math.round(brg(POS, nx))).padStart(3, '0') + '°', 500, 22, C.g, 16, 'right'); txt(x, dist(POS, nx).toFixed(1), 470, 44, C.g, 17, 'right', 700); txt(x, 'NM', 500, 44, C.c, 13, 'right'); }
   x.restore();
 }
 

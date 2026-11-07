@@ -150,7 +150,13 @@ export function buildShell(ctx) {
       } else S(g, M.black, V(cx - sd * 0.012, 0.70, -0.2), [0.12, 0, -sd * 0.1], V(1, 1, 1.25)); }
     if (sd > 0) S(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 10), new THREE.MeshStandardMaterial({ color: 0xa01c1c, roughness: 0.5 }), V(cx - sd * 0.03, 0.835, -0.205), [0, 0, sd * 0.9]);
     // tiller: hand wheel on a hub
-    { const t = new THREE.TorusGeometry(0.052, 0.009, 10, 32); S(t, M.black, V(cx - sd * 0.03, 0.70, -0.48), [Math.PI / 2 - 0.25, 0, 0]); S(new THREE.CylinderGeometry(0.018, 0.022, 0.03, 16), M.darkMetal, V(cx - sd * 0.03, 0.685, -0.48)); S(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 10), M.black, V(cx - sd * 0.03 + 0.04, 0.72, -0.47)); }
+    { const t = new THREE.TorusGeometry(0.052, 0.009, 10, 32); S(new THREE.CylinderGeometry(0.018, 0.022, 0.03, 16), M.darkMetal, V(cx - sd * 0.03, 0.685, -0.48));
+      if (sd < 0) { // the captain's tiller turns (nose-wheel steering)
+        const piv = new THREE.Group(); piv.position.set(cx - sd * 0.03, 0.70, -0.48); piv.rotation.x = -0.25; root.add(piv);
+        const wheel = new THREE.Mesh(t, M.black); wheel.rotation.x = Math.PI / 2; piv.add(wheel);
+        const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 10), M.black); knob.position.set(0.04, 0.02, 0.01); piv.add(knob);
+        out.tillerL = { piv, wheel, knob };
+      } else { S(t, M.black, V(cx - sd * 0.03, 0.70, -0.48), [Math.PI / 2 - 0.25, 0, 0]); S(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 10), M.black, V(cx - sd * 0.03 + 0.04, 0.72, -0.47)); } }
     // oxygen mask stowage box with flip doors and test lever
     S(new RoundedBoxGeometry(0.16, 0.05, 0.19, 2, 0.01), plastic, V(cx - sd * 0.005, 0.69, -0.86));
     S(new THREE.BoxGeometry(0.004, 0.003, 0.18), M.black, V(cx - sd * 0.005, 0.716, -0.86));
