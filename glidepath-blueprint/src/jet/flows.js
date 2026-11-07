@@ -79,7 +79,7 @@ export const STEPS = {
   // ---------- pushback, before taxi, taxi, line-up, take-off, after take-off ----------
   parkOffPush: { ph: 'push', kind: 'set', t: 'PARKING BRAKE — OFF (tug connected)', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => !s.sw.parkBrk, tip: 'Turn the handle to OFF. The tug holds the aircraft.' },
   callPush: { ph: 'push', kind: 'set', t: 'Call for pushback', where: 'Push button in the overlay (key P)', ctl: ['push'], done: s => !!s.st.fdm.push, tip: 'The tug pushes you back and turns you onto the taxi line.' },
-  pushWait: { ph: 'push', kind: 'wait', t: 'Pushback — wait until the tug has disconnected', where: 'Outside view shows the tug', look: 'nd', done: s => !!(s.st.fdm.push && s.st.fdm.push.gone) },
+  pushWait: { ph: 'push', kind: 'wait', t: 'Pushback — wait until the tug has disconnected', where: 'Outside view (key 5) shows the tug', done: s => !!(s.st.fdm.push && s.st.fdm.push.gone) },
   parkSetPush: { ph: 'push', kind: 'set', t: 'PARKING BRAKE — SET', where: 'Pedestal · PARK BRK', ctl: ['parkBrk'], done: s => s.sw.parkBrk },
   flapsTO: { ph: 'btaxi', kind: 'set', t: 'FLAPS — 1 (take-off setting)', where: 'Pedestal · FLAPS', ctl: ['flaps'], done: s => s.sw.flaps === 1 },
   spoilersArm: { ph: 'btaxi', kind: 'set', t: 'GROUND SPOILERS — ARM', where: 'Pedestal · SPEED BRAKE lever', ctl: ['spdBrk'], done: s => s.sw.spdBrk === 1 },

@@ -138,8 +138,14 @@ const CSS = `
 .jh-help{position:absolute;right:12px;top:58px;width:min(360px,calc(100cqw - 24px));max-height:calc(100cqh - 76px);overflow:auto;padding:14px 16px;display:none}
 .jh-help.open{display:block}.jh-help h4{margin:0 0 6px;font:700 15px/1.2 var(--f-display,sans-serif)}.jh-help table{width:100%;border-collapse:collapse;font-size:12.5px}.jh-help td{padding:3px 4px;vertical-align:top;border-top:1px solid rgba(255,255,255,.08)}.jh-help td:first-child{white-space:nowrap;font-family:var(--f-mono,monospace);color:#9fe0ee;font-size:11.5px}
 @container jhud (max-width: 600px){
-  .jh-fly{right:6px;left:6px;bottom:126px;justify-content:space-between;padding:7px;gap:6px}
-  .jh-fly .pad{width:118px;height:118px}.jh-fly .col{width:auto;flex:1}.jh-fly .thr{width:40px}
+  .jhud .jh-fly{right:6px;left:6px;bottom:112px;justify-content:space-between;align-items:flex-end;padding:0;gap:6px;background:none;border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;pointer-events:none}
+  .jh-fly>*{pointer-events:auto}
+  .jh-fly .pad{width:88px;height:88px;order:3;background:radial-gradient(circle,rgba(20,30,38,.55),rgba(8,12,16,.7))}.jh-fly .pad .n{width:32px;height:32px;margin:-16px 0 0 -16px}.jh-fly .pad .lb{display:none}
+  .jh-fly .thr{width:30px;height:92px;align-self:flex-end;background:rgba(8,12,16,.6)}.jh-fly .thr i b{display:none}
+  .jh-fly .col{width:96px;order:2;gap:4px;justify-content:flex-end}.jh-fly .til{display:none}
+  .jh-fly .brk{padding:6px 0!important;background:rgba(8,12,16,.6)!important}
+  .jh-fly .btns{grid-template-columns:1fr 1fr}.jh-fly [data-f="gear"],.jh-fly [data-f="flapsUp"],.jh-fly [data-f="flapsDn"],.jh-fly [data-f="park"]{display:none}
+  .jh-fly .btns button{background:rgba(8,12,16,.6)}
   .jhud.flying .jh-dock.sheet{height:46cqh}
   .jh-co{top:52px;font-size:16px}
 }
@@ -183,7 +189,7 @@ export function createHUD(wrap, api) {
     <tr><td>1–4 · 5</td><td>Cockpit views · Outside view (drag to orbit, wheel to zoom)</td></tr>
     <tr><td>Mouse</td><td>Drag the 3D sidestick, tiller or thrust levers (Shift: one lever). Click switches and knobs as before.</td></tr>
     <tr><td>Gamepad</td><td>Left stick = sidestick, right stick = rudder / tiller, triggers = brakes, bumpers = thrust</td></tr>
-    <tr><td>Touch</td><td>On-screen stick, thrust slider, tiller slider and the BRAKE button (hold)</td></tr>
+    <tr><td>Touch</td><td>On-screen stick, thrust slider, tiller slider and the BRAKE button (hold). On a phone the stick steers the nose wheel at taxi speed.</td></tr>
   </table><p style="margin:8px 0 0;color:#93a9b3;font-size:12px">Generic, simplified flight model and autopilot for procedure training. Not a certified device.</p></div>
   <div class="g jh-fly" aria-label="On-screen flying controls">
     <div class="thr" role="slider" aria-label="Thrust levers" tabindex="0"><i style="top:92%"><b>IDLE</b></i><i style="top:62%"><b>CL</b></i><i style="top:35%"><b>FLX</b></i><i style="top:8%"><b>TOGA</b></i><div class="h"></div></div>

@@ -136,7 +136,7 @@ export default function (host) {
     if (viewName === 'outside') {   // chase / orbit around the aircraft, relative to its heading
       const F = sys.st.fdm, c = acft.localToWorld(V(0, 3.2, -2)), yaw = F.yaw + orbit.yaw;
       cam.position.set(c.x + Math.sin(yaw) * Math.cos(orbit.pitch) * orbit.dist, Math.max(GROUND + 1.5, c.y + Math.sin(orbit.pitch) * orbit.dist), c.z + Math.cos(yaw) * Math.cos(orbit.pitch) * orbit.dist);
-      cam.lookAt(c); return;
+      cam.lookAt(c); cam.updateMatrixWorld(); return;
     }
     // cockpit: the head rides with the aircraft; smoothed g-lean and runway vibration
     const F = sys.st.fdm, gs = F.onGround ? F.gs : 0, amp = REDUCED ? 0 : (gs > 1 ? 0.0004 + 0.0022 * Math.min(1, gs / 140) : 0);
@@ -147,6 +147,7 @@ export default function (host) {
     cockpit.updateMatrixWorld(true);
     cam.position.copy(cockpit.localToWorld(lp));
     cam.quaternion.copy(cockpit.getWorldQuaternion(new THREE.Quaternion())).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(view.pitch + head.v * 0.8, view.yaw, 0, 'YXZ')));
+    cam.updateMatrixWorld();
   }
   const head = { lean: 0, v: 0 };
   /* aircraft pose from the flight model */
@@ -230,7 +231,7 @@ export default function (host) {
     <p class="note">Times: APU about ${REF.apuStart} s (Fast start ${REF.apuStartFast} s); IRS alignment shortened to ${REF.irsAlign} s (real ${REF.irsReal}); engine start about 50 s. All engine and system figures are approximate.</p>
     <p class="note"><b>Generic training aid.</b> Not a certified training device, and not any manufacturer's or operator's procedures. The aircraft is a fictional twin-jet; follow your operator's manuals and your instructor.</p>`;
   const N = {};
-  for (const [k, l] of [['pwr', 'AC power'], ['apu', 'APU'], ['irs', 'IRS'], ['e1', 'ENG 1'], ['e2', 'ENG 2'], ['hyd', 'HYD 1/2/3'], ['bleed', 'Bleed (L/R)']]) { const d = document.createElement('div'); d.innerHTML = `<dt>${l}</dt><dd></dd>`; out.querySelector('[data-k="nums"]').appendChild(d); N[k] = d.querySelector('dd'); }
+  for (const [k, l] of [['pwr', 'AC power'], ['apu', 'APU'], ['irs', 'IRS'], ['e1', 'ENG 1'], ['e2', 'ENG 2'], ['hyd', 'HYD 1/2/3'], ['bleed', 'Bleed (L/R)'], ['fly', 'Speed · altitude'], ['wx', 'Weather (fictional)']]) { const d = document.createElement('div'); d.innerHTML = `<dt>${l}</dt><dd></dd>`; out.querySelector('[data-k="nums"]').appendChild(d); N[k] = d.querySelector('dd'); }
   function readout() {
     const s = sys.st, E = s.elec;
     N.pwr.textContent = E.ac ? (E.src1 === E.src2 ? E.src1 : `${E.src1 || '—'} / ${E.src2 || '—'}`) : E.dc ? 'none (batteries only)' : 'none';
@@ -240,6 +241,7 @@ export default function (host) {
     s.eng.forEach((e, i) => { N['e' + (i + 1)].textContent = e.n2 < 0.5 && !e.fire ? 'off' : `${e.fire ? 'FIRE · ' : e.phase === 'START' ? 'starting · ' : e.running ? 'idle · ' : ''}N1 ${e.n1.toFixed(1)} · N2 ${e.n2.toFixed(1)} · EGT ${Math.round(e.egt)}`; });
     N.hyd.textContent = s.hyd.p.map(p => Math.round(p / 50) * 50).join(' / ') + ' psi';
     N.bleed.textContent = s.bleed.duct.map(Math.round).join(' / ') + ' psi';
+    { const F = s.fdm; N.fly.textContent = `${Math.round(F.ias)} kt · ${Math.round(F.alt / 10) * 10} ft · GS ${Math.round(F.gs)} kt · ${s.af.thr || '—'} | ${s.af.vert || '—'} | ${s.af.lat || '—'}`; N.wx.textContent = METAR; }
     const st = out.querySelector('[data-k="status"]');
     const fire = s.eng.findIndex(e => e.fire);
     let t = 'Cold & dark';
@@ -407,7 +409,7 @@ export default function (host) {
     const gp = readGamepad(), I = sys.st.inp, low = sys.st.fdm.onGround && sys.st.fdm.gs < 25;
     I.pitch = clamp(kb.pitch + drag.pitch + touch.pitch + (gp ? gp.pitch : 0), -1, 1); I.roll = clamp(kb.roll + drag.roll + touch.roll + (gp ? gp.roll : 0), -1, 1);
     I.rudder = clamp(kb.rudder + (gp && gp.yaw ? gp.yaw : 0) + (low ? 0 : touch.tiller), -1, 1);
-    I.tiller = clamp(kb.tiller + drag.tiller + (low ? touch.tiller : 0) + (gp && low && gp.yaw ? gp.yaw : 0), -1, 1);
+    I.tiller = clamp(kb.tiller + drag.tiller + (low ? touch.tiller + touch.roll : 0) + (gp && low && gp.yaw ? gp.yaw : 0), -1, 1);   // on the ground at taxi speed the on-screen stick also steers
     const br = Math.max(k('b') ? 1 : 0, touch.brake, gp && gp.brake ? gp.brake : 0); I.brakeL = Math.max(br, k(',') ? 1 : 0); I.brakeR = Math.max(br, k('.') ? 1 : 0);
     if (gp) { if (gp.throttle != null && Math.abs(gp.throttle - Math.max(sys.sw.thr1, sys.sw.thr2)) > 0.05) setThr(gp.throttle); gpThrT -= dt; if (gpThrT <= 0 && (gp.thrUp || gp.thrDn)) { gpThrT = 0.35; setThr(Math.max(sys.sw.thr1, sys.sw.thr2) + (gp.thrUp ? 0.25 : -0.25)); } }
     hud.fly && hud.fly.sync(sys);
@@ -433,7 +435,7 @@ export default function (host) {
   const actionText = c => c.guide && !c.touch ? (c.guide(sys).area ? 'Type the entry' : 'Press') : c.kind === 'check' || c.touch ? 'Touch to check' : c.kind === 'wait' ? 'Monitor' : c.kind === 'confirm' ? 'Press Done' : (c.t.split('—')[1] || '').replace(/\(.*\)/, '').trim() || 'Operate';
   let focusDim = 0;
   function updateGuidance(t, dt) {
-    const guided = mode === 'guided' && flow && !flow.finished;
+    const guided = mode === 'guided' && flow && !flow.finished && viewName !== 'outside';
     tg = guided ? targets() : [];
     hls.forEach((m, i) => { const T = tg[i]; m.visible = !!T; if (!T) return; m.position.copy(T.pos).addScaledVector(T.nrm, 0.004); if (T.quat) m.quaternion.copy(T.quat); else m.lookAt(tmpV.copy(T.pos).add(T.nrm)); const pul = 1 + 0.07 * Math.sin(t * 5); m.scale.set(T.w * pul, T.h * pul, 1); });
     hlMat.opacity = 0.7 + 0.3 * Math.sin(t * 5);
