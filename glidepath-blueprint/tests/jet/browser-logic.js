@@ -24,6 +24,8 @@ srv.listen(0, async () => {
     const count = (k, x0, y0, x1, y1, f) => { const c = D(k).c, sc = c.width / 512; const d = grab(k).getImageData(Math.round(x0 * sc), Math.round(y0 * sc), Math.round((x1 - x0) * sc), Math.round((y1 - y0) * sc)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (f(d[i], d[i + 1], d[i + 2])) n++; return n; };
     const cyan = (r, g, b) => b > 200 && g > 170 && r < 120, mag = (r, g, b) => r > 200 && b > 170 && g < 120, yel = (r, g, b) => r > 220 && g > 200 && b < 110;
     const hash = k => { const c = D(k).c; const d = grab(k).getImageData(0, 0, c.width, c.height).data; let a = 0; for (let i = 0; i < d.length; i += 28) a = (a * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) % 1000000007; return a; };
+    // read the current checklist through the card API like a careful trainee; set the baro if the checklist stops on it
+    const CL0 = () => { for (let i = 0; i < 200; i++) { const c = h.flow.current(); if (!c || c.kind !== 'checklist') return; const C = h.cl; if (C.status === 'active') h.clAnswer(C.correctIndex()); else { if (C.cur() && C.cur().c === 'BARO REF') { h.knob('baroL', 'set', 1009); h.knob('baroR', 'set', 1009); } h.advance(0.3); } h.advance(0.05); } };
     // ---------------- cold & dark to engines running ----------------
     h.setMode('practice'); h.setScenario('full');
     check(!s().elec.dc && s().irs.every(r => r.mode === 'OFF') && s().apu.n === 0 && s().eng.every(e => e.n2 === 0), 'cold & dark: no power, IRS off, APU and engines stopped');
@@ -51,7 +53,7 @@ srv.listen(0, async () => {
     refresh(); check(count('pfd', 48, 114, 114, 166, cyan) > 40 && count('pfd', 48, 114, 114, 166, mag) > 10, 'V1 / VR / V2 on the PFD speed tape');
     until(() => s().irs.every(r => r.aligned));
     check(s().irs.every(r => r.aligned), 'IRS 1, 2, 3 aligned');
-    A('beacon', 1); A('parkBrk'); A('thr1'); A('pack1', false); A('pack2', false); A('apuBleed'); A('engMode', 'IGN'); A('master2', true);
+    A('beacon', 1); A('parkBrk'); A('thr1'); A('pack1', false); A('pack2', false); A('apuBleed'); CL0(); check(h.cl.isDone('beforeStart'), 'BEFORE START checklist read on the card (' + h.cl.log.map(l => l.kind + ' ' + l.item).join(', ') + ')'); A('engMode', 'IGN'); A('master2', true);
     until(() => s().eng[1].running); h.advance(8);
     const e2 = s().eng[1];
     check(e2.running && e2.n1 > 19 && e2.n1 < 21 && e2.n2 > 58 && e2.n2 < 60 && e2.egt > 400 && e2.egt < 450, `ENG 2 stable at idle: N1 ${f1(e2.n1)} %, N2 ${f1(e2.n2)} %, EGT ${Math.round(e2.egt)} °C, FF ${Math.round(e2.ff)} kg/h`);
@@ -61,7 +63,7 @@ srv.listen(0, async () => {
     A('engMode', 'NORM'); A('apuBleed', false); A('pack1', true); A('pack2', true); A('apuMaster', false); h.advance(3);
     check(s().elec.genOn[0] && s().elec.genOn[1] && s().elec.src1 === 'GEN 1' && s().elec.src2 === 'GEN 2', 'GEN 1 and GEN 2 on line');
     check(s().hyd.p.every(p => p > 2800), 'HYD 1/2/3: ' + s().hyd.p.map(Math.round).join(' / ') + ' psi');
-    A('sd'); A('flaps', 1); h.advance(1);
+    A('sd'); A('flaps', 1); h.advance(1); CL0(); h.advance(0.5);
     let r = h.result();
     check(h.flow.finished && r.score === 100, `full flow scored ${r.score}/100: ${r.inOrder}/${r.total} in order, ${r.late.length} late, ${r.missed.length} missed, ${r.wrong.length} wrong, ${Math.round(r.time)} s`);
     // ---------------- engine fire during start ----------------
@@ -131,6 +133,7 @@ srv.listen(0, async () => {
     const Lx = h.layout, F = () => h.fdm, wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
     const step = (sec, each) => { const n = Math.round(sec / 0.1); for (let i = 0; i < n; i++) { if (each && each() === true) return true; h.advance(0.1); } return false; };
     const inp = o => h.input(o);
+    const CLR = (title, key, part = 'all') => { const C = h.sys.cl; step(30, () => { const c = h.flow.current(); if (!c || c.kind !== 'checklist') return true; if (C.status === 'active') h.clAnswer(C.correctIndex()); return false; }); check(C.isDone(key, part) && h.flow.current().kind !== 'checklist', title + ' checklist read through the card API and complete'); };
     function drive(tgtKt, stopAtHold) {
       const fd = F(), sn = Lx.toSN(fd.x, fd.z), nr = Lx.nearest(Lx.TAXI_PATH, sn.s, sn.n); let k = nr.i, acc = 0;
       while (k < Lx.TAXI_PATH.length - 1 && acc < 16 + fd.gs * 0.6) { acc += Math.hypot(Lx.TAXI_PATH[k + 1].s - Lx.TAXI_PATH[k].s, Lx.TAXI_PATH[k + 1].n - Lx.TAXI_PATH[k].n); k++; }
@@ -142,16 +145,17 @@ srv.listen(0, async () => {
     }
     A('parkBrk', false); A('push'); step(70, () => F().push && F().push.gone);
     check(F().push && F().push.gone && Math.abs(F().hdg - 4) < 6, `pushback with the tug: heading ${Math.round(F().hdg)}, flow at ${h.flow.current().id}`);
-    A('parkBrk', true); A('flaps', 1); A('spdBrk', 1); A('autoBrkMax');
+    A('parkBrk', true); CLR('AFTER START', 'afterStart'); A('flaps', 1); A('spdBrk', 1); A('autoBrkMax');
     for (const [p2, r2] of [[1, 0], [-1, 0], [0, -1], [0, 1], [0, 0]]) { inp({ pitch: p2, roll: r2 }); h.advance(2); }
     A('toConfig'); A('parkBrk', false);
     check(h.flow.current().id === 'taxiHold', 'before taxi: flaps 1, spoilers armed, autobrake MAX, flight controls checked, T.O CONFIG normal');
     step(320, () => { drive(16, true); return h.sys.st.mon.atHold && h.sys.st.mon.held > 1; });
     check(h.sys.st.mon.atHold && !h.sys.st.mon.stopBarRun && h.sys.st.mon.taxiMax < 30, `taxied to the stop bar and stopped (max ${f1(h.sys.st.mon.taxiMax)} kt)`);
+    refresh(); h.hud.cl.render(h.cl, h.sys, 0); check(h.hud.root.querySelector('.jh-cl').classList.contains('show') && /BEFORE TAKE-OFF/.test(h.hud.root.querySelector('.jh-cl').textContent) && h.hud.root.querySelector('.jh-cl .sep'), 'BEFORE TAKE-OFF checklist card at the holding point, with the line'); CLR('BEFORE TAKE-OFF (to the line)', 'beforeTO', 'above');
     step(6, () => h.sys.st.mon.cleared); check(!h.sys.st.stopBar, 'stop bar out: cleared to line up');
     for (const [id, v] of [['strobe', 2], ['landL', 2], ['landR', 2], ['nose', 2], ['xpdr', 2]]) A(id, v);
     step(140, () => { drive(10, false); const sn = Lx.toSN(F().x, F().z); if (h.sys.st.mon.lined && sn.s > -515) { inp({ brakeL: 1, brakeR: 1 }); h.sys.setSwitch('thr1', 0); h.sys.setSwitch('thr2', 0); } return h.sys.st.mon.lined && F().gs < 0.5; });
-    inp({}); A('chrono'); refresh();
+    inp({}); A('chrono'); CLR('BEFORE TAKE-OFF (below the line)', 'beforeTO', 'below'); refresh();
     check(h.flow.current().id === 'thrustSet' && h.af.vert === 'SRS' && h.af.lat === 'RWY', `lined up; FMA on the ground: ${h.af.vert} | ${h.af.lat}, armed ${h.af.vertArm} ${h.af.latArm}`);
     A('thr1', 2); A('thr2', 2); h.advance(1); refresh();
     check(h.af.thr === 'MAN FLX +45' && h.sys.sw.athr, 'take-off thrust: FMA MAN FLX +45, A/THR armed');
@@ -162,8 +166,22 @@ srv.listen(0, async () => {
     check(h.sys.sw.ap1 && h.af.vert === 'SRS' && h.af.lat === 'NAV', `after lift-off: AP1 on, FMA ${h.af.thr} | ${h.af.vert} | ${h.af.lat}; RA ${Math.round(F().ra)} ft`);
     step(90, () => h.af.thr === 'LVR CLB'); check(h.af.thr === 'LVR CLB', `LVR CLB at ${Math.round(F().alt)} ft`);
     A('thr1', 1); A('thr2', 1); h.advance(2); check(h.af.athrActive && h.af.thr === 'THR CLB' && h.af.vert === 'CLB', `A/THR active: ${h.af.thr} | ${h.af.vert}`);
-    step(60, () => F().ias > 200); A('flaps', 0); step(240, () => h.flow.finished);
+    step(60, () => F().ias > 200); A('flaps', 0); step(16); CLR('AFTER TAKE-OFF', 'afterTO'); step(240, () => h.flow.finished);
     r = h.result(); check(h.flow.finished && r.score >= 90 && h.af.vert === 'ALT', `Taxi and take-off finished at ${Math.round(F().alt)} ft (FMA ${h.af.thr} | ${h.af.vert}): score ${r.score}; ${r.notes.join(' · ')}`);
+    // ---------------- checklist trainer with injected faults ----------------
+    h.setScenario('cltrain'); h.advance(0.3); refresh(); let sawStop = false, sawSep = false;
+    for (let i = 0; i < 400 && !h.flow.finished; i++) {
+      const C = h.cl, card = h.hud.root.querySelector('.jh-cl');
+      if (card.querySelector('.sep')) sawSep = true;
+      if (C.status === 'active') h.clAnswer(C.correctIndex());
+      else if (C.status === 'stopped') { h.hud.cl.render(C, h.sys, 1e9); if (/CHECKLIST STOPPED/.test(card.querySelector('.clstop').textContent) && !card.querySelector('.clstop').hidden) sawStop = true; h.flow.current().fault.fix(h.sys); h.advance(0.4); }
+      h.advance(0.05);
+    }
+    r = h.result();
+    check(h.flow.finished && sawStop && sawSep && r.notes.filter(n => /Good catch/.test(n)).length === 5, `checklist trainer: 5 stations, every injected fault caught (card showed CHECKLIST STOPPED and the line), score ${r.score}`);
+    h.setMode('guided'); h.setScenario('taxi'); A('parkBrk', false); A('push'); step(70, () => F().push && F().push.gone); A('parkBrk', true);
+    const blk = h.act('flaps', { to: 1 }); check(blk === 'blocked' && h.flow.current().id === 'clAfterStart' && h.sys.sw.flaps === 0, 'guided mode: flaps held back until the AFTER START checklist is read');
+    h.setMode('practice');
     // ---------------- rejected take-off ----------------
     h.setScenario('rto');
     A('thr1', 2); A('thr2', 2); step(60, () => h.sys.st.rtoInject.fired); h.advance(1.5); A('thr1', 0); A('thr2', 0);
@@ -195,7 +213,9 @@ srv.listen(0, async () => {
   chk(tc.on && tc.inside && tc.parts && tc.w < 600 && tc.scroll <= 390, `touch controls on a ${Math.round(tc.w)} px stage: stick (also steers at taxi speed), thrust, brake, push (page width ${tc.scroll})`);
   const box2 = await pp.evaluate(() => { const el = document.querySelector('#p-jet').__jet.hud.root.querySelector('.jh-fly .brk').getBoundingClientRect(); return { x: el.left + el.width / 2, y: el.top + el.height / 2 }; });
   await pp.touchscreen.tap(box2.x, box2.y); const brk = await pp.evaluate(() => document.querySelector('#p-jet').__jet.inputs.touch.brake);
-  chk(brk === 0, 'brake button releases after a tap'); console.log(out2.slice(-2).join('\n'));
+  chk(brk === 0, 'brake button releases after a tap');
+  const cl390 = await pp.evaluate(() => { const h = document.querySelector('#p-jet').__jet; h.setScenario('cltrain'); h.advance(0.3); h.hud.cl.render(h.cl, h.sys, 0); const el = h.hud.root.querySelector('.jh-cl'), r = el.getBoundingClientRect(), wr = h.S.renderer.domElement.getBoundingClientRect(); const b = el.querySelector('.clopts button'); return { show: el.classList.contains('show'), sheet: Math.abs(r.bottom - wr.bottom) < 3 && r.width > wr.width - 4, btn: b && b.getBoundingClientRect().height >= 26, scroll: document.documentElement.scrollWidth }; });
+  chk(cl390.show && cl390.sheet && cl390.btn && cl390.scroll <= 390, 'checklist card at 390 px: bottom sheet across the stage, response buttons tappable, no page overflow'); console.log(out2.slice(-3).join('\n'));
   res.ok = res.ok && ok2;
   console.log(res.out.join('\n')); console.log(res.ok ? 'ALL BROWSER LOGIC TESTS PASSED' : 'SOME FAILED');
   console.log('console errors/warnings:', JSON.stringify(errs));

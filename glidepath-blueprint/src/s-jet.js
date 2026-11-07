@@ -176,6 +176,10 @@ export default function (host) {
     retry: () => start(scn), next: () => { const o = ['guided', 'practice', 'memory']; setMode(o[(o.indexOf(mode) + 1) % 3]); }, close: () => hud.hideDebrief(),
     sound: () => toggleSound(), dock: () => hud.toggleDock(),
     flyInput: o => { Object.assign(touch, o); }, flyThr: (v, end) => { if (v != null) { sys.setSwitch('thr1', v); sys.setSwitch('thr2', v); } if (end) setThr((sys.sw.thr1 + sys.sw.thr2) / 2); },
+    clAnswer: i => clDo(() => sys.cl.answer(i)), clRecall: g => clDo(() => sys.cl.recall(g)), clJump: i => clDo(() => sys.cl.jump(i)),
+    clSpeech: alts => { const o = sys.cl.options(); if (!o.length) return; const norm = t => String(t).toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+      let best = -1, bs = 0; for (const a of alts) { const aw = norm(a); if (aw.includes('STOP')) { best = o.findIndex(x => x.startsWith('STOP')); bs = 9; break; } o.forEach((x, i) => { const xw = norm(x); const sc = xw.filter(w => aw.includes(w)).length / Math.max(1, xw.length); if (sc > bs) { bs = sc; best = i; } }); }
+      if (best >= 0 && bs >= 0.34) clDo(() => sys.cl.answer(best)); else hud.callout('Say again: ' + alts[0]); },
     flyStep: d => flyKey(d > 0 ? 'PageUp' : 'PageDown', true), flyAct: f => { if (f === 'gear') act({ id: 'gear' }); else if (f === 'flapsUp') act({ id: 'flaps' }, -1); else if (f === 'flapsDn') act({ id: 'flaps' }, 1); else if (f === 'push') act({ id: 'push' }); else if (f === 'park') act({ id: 'parkBrk' }); }
   });
   const root = hud.root;
@@ -257,6 +261,7 @@ export default function (host) {
   }
 
   /* ---------------- scenario lifecycle ---------------- */
+  let rndNext = null; // a seeded random source for the next scenario (tests, hero renders)
   let flow = null, debriefShown = false, lastCurId = null, frameAt = -1;
   function start(k) {
     scn = k; const sc = SCENARIOS[k];
@@ -264,7 +269,7 @@ export default function (host) {
     if (sc.fire) sys.fireInject = { ...sc.fire };
     if (sc.rto) sys.st.rtoInject = { ...sc.rto };
     tugAway = -1; hud.fly && hud.fly.show(!!sc.moving);
-    flow = createFlow(sys, k, mode); debriefShown = false; hud.hideDebrief(); lastCurId = null;
+    flow = createFlow(sys, k, mode, { rnd: rndNext || Math.random }); rndNext = null; debriefShown = false; hud.hideDebrief(); lastCurId = null;
     CL.render(flow, sys); hud.render(flow, sys);
     if (sSeg.v !== k) sSeg.set(k);
     HUDsync();
@@ -309,6 +314,7 @@ export default function (host) {
     const areas = p.h ? areasAt(p) : (p.areas || []);
     if (flow.touch(id, areas)) { audio.control('touch'); haptic(8); flashTouch(id, p); return 'check'; }
     if (id.startsWith('area:')) return null;
+    const blk = flow.blocked && flow.blocked(id); if (blk) { hud.callout(blk); say(blk); haptic(20); return 'blocked'; }   // guided: read the checklist before the next phase
     if (!c || c.k === 'deco' || c.k === 'ind') {
       if (C && C.guard) { C.guardOpen = !C.guardOpen; audio.control('guard'); haptic(); return 'guard'; }
       if (C && C.kind !== 'ind') { audio.control('pb'); deck.press(id, perf()); haptic(6); }
@@ -423,6 +429,7 @@ export default function (host) {
   function targets() {
     const c = flow && flow.current(); if (!c) return [];
     const res = [];
+    if (c.kind === 'checklist') { const it = sys.cl.status === 'stopped' && sys.cl.cur(); if (it && it.ctl) { const w = deck.ctlWorld(it.ctl); if (w) res.push({ ...w, id: it.ctl, w: w.size * 2, h: w.size * 2 }); } return res; }
     if (c.guide && !c.touch) { const g = c.guide(sys); if (g.ctl) { const w = deck.ctlWorld(g.ctl); if (w) res.push({ ...w, id: g.ctl, w: w.size * 2.2, h: w.size * 2.2 }); } else if (g.area) { const a = deck.areaWorld(g.area); if (a) res.push({ pos: a.pos, nrm: a.nrm, quat: a.quat, w: a.w + 0.006, h: a.h + 0.006, panel: a.panel, area: a.a }); } return res; }
     if (c.ctl) { const ids = c.any ? [c.ctl[0]] : c.kind === 'set' && !c.touch ? c.ctl.filter(id => !ctlDone(c, id)) : c.ctl; for (const id of (ids.length ? ids : c.ctl)) { const w = deck.ctlWorld(id); if (w) res.push({ ...w, id, w: w.size * 1.75, h: w.size * 1.75 }); if (c.ctl.length > 1 && c.kind !== 'set' && res.length) break; } }
     else if (c.area) { const a = deck.areaWorld(c.area); if (a) res.push({ pos: a.pos, nrm: a.nrm, quat: a.quat, w: a.w + 0.01, h: a.h + 0.01, panel: a.panel, area: a.a }); }
@@ -432,7 +439,7 @@ export default function (host) {
   let tg = [];
   function showMe(dur = 1.0) { if (!tg.length) tg = targets(); if (tg[0]) { const c = tg.reduce((a, t) => a.add(t.pos), V(0, 0, 0)).multiplyScalar(1 / tg.length); lookAtWorld(c, tg[0].panel, dur); } }
   const tmpV = new THREE.Vector3();
-  const actionText = c => c.guide && !c.touch ? (c.guide(sys).area ? 'Type the entry' : 'Press') : c.kind === 'check' || c.touch ? 'Touch to check' : c.kind === 'wait' ? 'Monitor' : c.kind === 'confirm' ? 'Press Done' : (c.t.split('—')[1] || '').replace(/\(.*\)/, '').trim() || 'Operate';
+  const actionText = c => c.kind === 'checklist' ? 'Fix it — the checklist resumes' : c.guide && !c.touch ? (c.guide(sys).area ? 'Type the entry' : 'Press') : c.kind === 'check' || c.touch ? 'Touch to check' : c.kind === 'wait' ? 'Monitor' : c.kind === 'confirm' ? 'Press Done' : (c.t.split('—')[1] || '').replace(/\(.*\)/, '').trim() || 'Operate';
   let focusDim = 0;
   function updateGuidance(t, dt) {
     const guided = mode === 'guided' && flow && !flow.finished && viewName !== 'outside';
@@ -481,12 +488,19 @@ export default function (host) {
     c.addEventListener('connected', e => { c.userData.src = e.data; }); c.addEventListener('select', () => { lastXRSource = c.userData.src; const o = c.getWorldPosition(V(0, 0, 0)), d = V(0, 0, -1).applyQuaternion(c.getWorldQuaternion(new THREE.Quaternion())); act(pickRay(o, d)); }); });
   xrSupported().then(ok => { vrB.hidden = hudVR.hidden = !ok; vrNote.hidden = ok; });
 
+  function clDo(f) { const r = f(); audio.control('key'); haptic(6); hud.cl.render(sys.cl, sys, tAbs); return r; }
+
   /* ---------------- callouts and messages: on screen, and a synthetic voice when sound is on ---------------- */
   function say(t) { try { if (!audio.on || !window.speechSynthesis) return; const u = new SpeechSynthesisUtterance(t); u.rate = 1.05; u.pitch = 0.9; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) { /* no voice */ } }
   const MSG = { cleared: ['Tower: cleared to line up runway 27R', 'Line up runway 2 7 right'], pushStart: ['Ground crew: pushing back', ''], pushDone: ['Ground crew: tug disconnected, clear to taxi', ''], pushStopped: ['Ground crew: set parking brake', ''],
     stopBarRun: ['Stop bar crossed without clearance', ''], tailstrike: ['TAIL STRIKE', ''], apOff: ['AP OFF', ''], pushRefused: ['Beacon on and parking brake off before the push', ''], toConfigOk: ['T.O CONFIG normal', ''] };
   function onEvent(e) {
     if (e.type === 'callout') { hud.callout(e.text); say(e.text); haptic(10); }
+    else if (e.type === 'clRead') say(e.text.replace(/\//g, ' and '));   // the pilot monitoring reads the challenge
+    else if (e.type === 'clStop') { const t = 'Checklist stopped. ' + e.why + '.'; hud.callout(t, 'W'); say(t); haptic(30); }
+    else if (e.type === 'clResume') { hud.callout('Resuming the checklist'); }
+    else if (e.type === 'clWrong') { hud.callout(e.text); say('Check again'); }
+    else if (e.type === 'clComplete') { const t = `${e.title.replace(' / CLIMB', '')} checklist complete${e.part === 'above' ? ' down to the line' : ''}`; hud.callout(t); say(t.toLowerCase()); }
     else if (MSG[e.type]) { hud.callout(MSG[e.type][0], e.type === 'stopBarRun' || e.type === 'tailstrike' ? 'W' : ''); if (MSG[e.type][1]) say(MSG[e.type][1]); }
   }
 
@@ -513,7 +527,7 @@ export default function (host) {
     if (touchT > 0) { touchT -= dt; touchMark.material.opacity = Math.max(0, touchT / 0.6); touchMark.scale.setScalar(1 + (0.6 - touchT) * 2); }
     roT += dt; clT += dt;
     if (clT > 0.2) {
-      clT = 0; CL.render(flow, sys); hud.render(flow, sys, { score: liveScore() });
+      clT = 0; CL.render(flow, sys); hud.render(flow, sys, { score: liveScore() }); hud.cl.render(sys.cl, sys, tAbs);
       const w = sys.st.alerts.find(a => a.lvl === 'W'), cu = sys.st.alerts.find(a => a.lvl === 'C');
       hud.alert(w ? `⚠ ${w.title}` : cu ? cu.title : '', w ? 'W' : 'C');
     }
@@ -551,7 +565,7 @@ export default function (host) {
     /** continuous flying inputs for tests: { pitch, roll, rudder, tiller, brakeL, brakeR } (cleared by setScenario) */
     input(o) { Object.assign(drag, { pitch: 0, roll: 0, tiller: 0 }); Object.assign(sys.st.inp, { pitch: 0, roll: 0, rudder: 0, tiller: 0, brakeL: 0, brakeR: 0 }, o); Object.assign(touch, { pitch: o.pitch ?? 0, roll: o.roll ?? 0, tiller: o.tiller ?? 0, brake: Math.max(o.brakeL ?? 0, o.brakeR ?? 0) }); },
     layout: { toSN, nearest, TAXI_PATH, HOLD, RWY, YAW_RWY },
-    get fdm() { return sys.st.fdm; }, get af() { return sys.st.af; }, setThrust: v => setThr(v), orbit(o) { Object.assign(orbit, o); }, get inputs() { return { kb, drag, touch }; },
+    get fdm() { return sys.st.fdm; }, get cl() { return sys.cl; }, setRnd(f) { rndNext = f; }, clAnswer: i => clDo(() => sys.cl.answer(i)), clRecall: g => clDo(() => sys.cl.recall(g)), clJump: i => clDo(() => sys.cl.jump(i)), get af() { return sys.st.af; }, setThrust: v => setThr(v), orbit(o) { Object.assign(orbit, o); }, get inputs() { return { kb, drag, touch }; },
     /** compact copy of the avionics and switch state for tests */
     state() { const s = sys.st; return JSON.parse(JSON.stringify({ av: s.av, sdPage: s.sdPage, sw: sys.sw, press: s.press, cond: s.cond, doors: s.doors, brakes: s.brakes, fctl: s.fctl, eng: s.eng.map(e => ({ phase: e.phase, n2: e.n2, sv: e.sv, fuelOn: e.fuelOn, lit: e.lit, running: e.running, man: e.man, fire: e.fire, fault: e.fault })) })); }
   };

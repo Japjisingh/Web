@@ -70,6 +70,7 @@ function takeoff(lever, label) {
   const sc = SCENARIOS.taxi; sys.reset(sc.init); const Fl = createFlow(sys, 'taxi', 'practice');
   const op = (id, v) => { if (Fl.touch(id)) return; const r = operate(sys, id, v === undefined ? undefined : { to: v }); if (r.did) Fl.operated(id); };
   const step = (sec, each) => { const n = Math.round(sec * 30); for (let i = 0; i < n; i++) { if (each && each() === true) { Fl.update(); return true; } sys.update(1 / 30); Fl.update(); } return false; };
+  const cl = (title) => { const C = sys.cl; step(30, () => { const c = Fl.current(); if (!c || c.kind !== 'checklist') return true; if (C.status === 'active') C.answer(C.correctIndex()); return false; }); check(C.log.every(l => l.kind === 'caught'), title + ' checklist read and complete'); };
   // simple taxi driver: look-ahead steering on the green line, speed by thrust and brakes, stop at the stop bar
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   function drive(tgtKt, stopAtHold) {
@@ -84,25 +85,26 @@ function takeoff(lever, label) {
   }
   op('parkBrk', false); op('push'); step(70, () => F().push && F().push.gone);
   check(F().push && F().push.gone && Fl.current().id === 'parkSetPush', `pushback done: main gear at s ${f0(toSN(F().x, F().z).s)}, n ${f0(toSN(F().x, F().z).n)}, heading ${f0(F().hdg)}`);
-  op('parkBrk', true); op('flaps', 1); op('spdBrk', 1); op('autoBrkMax');
+  op('parkBrk', true); cl('AFTER START'); op('flaps', 1); op('spdBrk', 1); op('autoBrkMax');
   for (const [p, r] of [[1, 0], [-1, 0], [0, -1], [0, 1], [0, 0]]) { I().pitch = p; I().roll = r; step(2); }
   op('toConfig'); step(1);
   check(Fl.current().id === 'parkOffTaxi', 'before-taxi steps done (flaps, spoilers, autobrake, flight controls, T.O CONFIG): next ' + Fl.current().id);
   op('parkBrk', false);
   step(300, () => { drive(16, true); return s().mon.atHold && s().mon.held > 1; });
   check(s().mon.atHold && !s().mon.stopBarRun && s().mon.taxiMax < 30, `taxied to the holding point and stopped before the stop bar (max ${f1(s().mon.taxiMax)} kt)`);
+  step(4); check(!s().mon.cleared && s().stopBar, 'held at the stop bar until the BEFORE TAKE-OFF checklist is done to the line'); cl('BEFORE TAKE-OFF (to the line)');
   step(5, () => s().mon.cleared); check(s().mon.cleared && !s().stopBar, 'cleared: stop bar out');
   op('strobe', 2); op('landL', 2); op('landR', 2); op('nose', 2); op('xpdr', 2);
   step(120, () => { drive(10, false); const sn = toSN(F().x, F().z); if (s().mon.lined && sn.s > -515) { I().brakeL = I().brakeR = 1; sys.setSwitch('thr1', 0); sys.setSwitch('thr2', 0); I().tiller = 0; } return s().mon.lined && F().gs < 0.5; });
   I().brakeL = I().brakeR = 0; I().tiller = 0; step(1);
   check(s().mon.lined && Fl.current().id === 'chrono', `lined up on the runway centre line (offset ${f1(toSN(F().x, F().z).n - RWY.n)} m, heading ${f0(F().hdg)})`);
-  op('chrono'); op('thr1', 2); op('thr2', 2);
+  op('chrono'); cl('BEFORE TAKE-OFF (below the line)'); op('thr1', 2); op('thr2', 2);
   step(80, () => { const fd = F(); I().rudder = Math.max(-1, Math.min(1, -(toSN(fd.x, fd.z).n - RWY.n) * 0.15 - wrap((fd.hdg - 274) * Math.PI / 180) * 3)); I().pitch = fd.ias >= 140 && fd.pitch < 15 * Math.PI / 180 ? 0.6 : 0; return fd.ra > 60; });
   I().rudder = 0; I().pitch = 0; step(3);
   op('gear', 'UP'); step(1); op('ap1'); step(2);
   check(Fl.current().id === 'thrCL', 'take-off steps done; next: ' + Fl.current().id + ' — FMA ' + [s().af.thr, s().af.vert, s().af.lat].join(' | '));
   step(80, () => s().af.thr === 'LVR CLB'); op('thr1', 1); op('thr2', 1);
-  step(60, () => F().ias > 200); op('flaps', 0);
+  step(60, () => F().ias > 200); op('flaps', 0); step(16); cl('AFTER TAKE-OFF / CLIMB');
   step(240, () => Fl.finished);
   const r = Fl.result();
   check(Fl.finished && r.score >= 90 && r.wrong.length === 0, `Taxi and take-off finished: score ${r.score}, ${r.inOrder}/${r.total}; ${r.notes.join(' · ')}`);

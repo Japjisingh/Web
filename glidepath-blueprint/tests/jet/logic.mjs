@@ -3,6 +3,7 @@ import { createSystems, REF } from '../../src/jet/systems.js';
 import { createFlow, SCENARIOS } from '../../src/jet/flows.js';
 import { CTL, operate, fmsId } from '../../src/jet/controls.js';
 import { baroAlt, fmsStatus, QNH_TODAY } from '../../src/jet/avionics.js';
+import { CHECKLISTS, STATIONS, STOP, respText } from '../../src/jet/checklists.js';
 const sys = createSystems({ fast: false });
 let ok = true; const check = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) ok = false; };
 const fmt = x => Math.round(x * 10) / 10;
@@ -11,6 +12,9 @@ function run(key) {
   const F = createFlow(sys, key, 'practice');
   const op = (id, v) => { if (!CTL[id]) throw new Error('no control ' + id); if (F.touch(id)) return; if (CTL[id].k === 'ind') return; const r = operate(sys, id, v === undefined ? undefined : { to: v }); if (r.did) F.operated(id); };
   const touchArea = a => F.touch('area:' + a, a);
+  // answer the current checklist like a trainee who checks the state: expected response, or STOP on a discrepancy
+  const FIX = { 'BARO REF': () => { operate(sys, 'baroL', { to: QNH_TODAY }); operate(sys, 'baroR', { to: QNH_TODAY }); } };   // what a trainee does when the checklist stops
+  op.cl = (sec = 40) => { const t0 = sys.t; while (sys.t - t0 < sec) { F.update(); const c = F.current(); if (!c || c.kind !== 'checklist') return true; if (sys.cl.status === 'active') sys.cl.answer(sys.cl.correctIndex()); else { const it = sys.cl.cur(); if (it && FIX[it.c]) FIX[it.c](); sys.advance(0.2); } } return false; };
   op.type = (n, str) => { for (const ch of str) op(fmsId(n, ch === ' ' ? 'SP' : ch)); };
   const wait = (sec, cond) => { const t0 = sys.t; while (sys.t - t0 < sec) { sys.advance(0.5); F.update(); if (cond && cond()) break; } return sys.t - t0; };
   return { F, op, touchArea, wait };
@@ -60,7 +64,10 @@ function run(key) {
   wait(80, () => s.irs.every(r => r.aligned)); F.update();
   check(s.irs.every(r => r.aligned), 'IRS aligned at t=' + Math.round(sys.t) + ' s');
   check(F.steps.filter(x => x.ph !== 'before' && x.ph !== 'start' && x.ph !== 'after').every(x => x.state === 'done' || x.state === 'na'), 'cockpit prep steps all done in order');
-  op('beacon', 1); op('parkBrk'); op('thr1'); op('pack1', false); op('pack2', false); op('apuBleed'); op('engMode', 'IGN');
+  op('beacon', 1); op('parkBrk'); op('thr1'); op('pack1', false); op('pack2', false); op('apuBleed');
+  check(F.current().id === 'clBeforeStart' && sys.cl.status === 'active' && sys.cl.cur().c === 'COCKPIT PREPARATION', 'BEFORE START checklist comes up after the before-start flow');
+  op.cl(); check(sys.cl.isDone('beforeStart'), 'BEFORE START checklist complete' + (sys.cl.log.length ? ' (' + sys.cl.log.map(l => l.kind + ' ' + l.item).join(', ') + ')' : ''));
+  op('engMode', 'IGN');
   check(F.current() && F.current().id === 'm2on', 'before start complete, next: ' + (F.current() && F.current().id));
   op('master2', true);
   let peak = 0, sawIgn = false, svClose = -1;
@@ -79,7 +86,7 @@ function run(key) {
   check(s.elec.genOn[0] && s.elec.genOn[1] && s.elec.src1 === 'GEN 1' && s.elec.src2 === 'GEN 2', 'GEN 1 and GEN 2 on line');
   check(s.hyd.p.every(p => p > 2800), 'HYD 1/2/3 ' + s.hyd.p.map(Math.round).join('/') + ' psi');
   check(s.bleed.engValve[0] && s.bleed.engValve[1] && s.bleed.duct[0] > 30, 'engine bleeds open, duct ' + s.bleed.duct.map(fmt).join('/') + ' psi');
-  op('sd'); op('flaps', 1); F.update();
+  op('sd'); op('flaps', 1); F.update(); op.cl(); check(sys.cl.isDone('afterStart'), 'AFTER START checklist complete');
   const r = F.result();
   check(F.finished && r.score === 100 && r.wrong.length === 0, `full flow finished: score ${r.score}, ${r.inOrder}/${r.total} in order, wrong ${r.wrong.length}, time ${Math.round(r.time)} s`);
   check(s.master.warn === false && s.alerts.filter(a => a.lvl === 'W').length === 0, 'no warnings at the end; memos: ' + s.memos.map(m => m.t).join(', '));
@@ -197,6 +204,39 @@ function run(key) {
   sys.setSwitch('stickL', 'AFT'); sys.advance(2); check(s.fctl.elev[0] > 25, 'stick aft: elevators up ' + Math.round(s.fctl.elev[0]));
   check(s.brakes.temp[1] < 74 && s.brakes.temp[1] > 60, 'WHEEL: brakes cooling, ' + s.brakes.temp.map(Math.round).join('/') + ' C');
   check(s.cond.zone[0] < 26.4, 'COND: cockpit cooling with the packs: ' + s.cond.zone.map(t => t.toFixed(1)).join('/'));
+}
+// ---------- checklists: predicates in a correct state, injected faults, the runner stopping and resuming ----------
+for (const st of STATIONS) {
+  const D = CHECKLISTS[st.key], items = D.items.filter(it => st.part === 'all' || (st.part === 'below' ? it.below : !it.below));
+  const t = sys.t; sys.reset(st.init); sys.t = t; st.setup(sys); sys.advance(0.2); st.setup(sys);
+  const bad = items.filter(it => !it.ok(sys)).map(it => it.c);
+  check(!bad.length, `${D.title}${st.part !== 'all' ? ' (' + st.part + ' the line)' : ''}: every item passes in a correct state (${items.length} items)` + (bad.length ? ' — failing: ' + bad.join(', ') : ''));
+  for (const f of st.faults) { st.setup(sys); f.apply(sys); sys.advance(0.1); const it = items.find(x => x.c === f.item); check(it && !it.ok(sys), `${D.title}: fault “${f.name}” caught by ${f.item}: “${it && it.why}”`); }
+}
+{
+  const F = createFlow(sys, 'cltrain', 'practice', { rnd: () => 0.01 }); const C = sys.cl;
+  // policies per station: 0 catches the fault, 1 reads over it (missed), 2 gives one wrong response and reads one item out of order, 3–4 normal
+  const run = (k) => { const st = F.current(); let caught = null, missed = false;
+    for (let i = 0; i < 60 && !F.finished && F.current() === st; i++) {
+      if (C.status === 'active') {
+        const it = C.cur();
+        if (k === 1 && !it.ok(sys)) { if (C.answer(respText(sys, it)) === 'stopped') missed = true; }
+        else if (k === 2 && i === 0) { C.answer(C.options().find(o => o !== respText(sys, it) && o !== STOP)); C.jump(C.idx + 2); }
+        else if (C.answer(C.correctIndex()) === 'caught') caught = it.c;
+      } else { st.fault.fix(sys); sys.advance(0.3); }
+      F.update();
+    } return { st, caught, missed }; };
+  const a = run(0); check(a.st.fault && a.caught === a.st.fault.item, `checklist trainer station 1 (${CHECKLISTS[a.st.cl].title}): fault “${a.st.fault.name}” caught at ${a.caught}, fixed, checklist resumed`);
+  const b = run(1); check(b.missed, `station 2 (${CHECKLISTS[b.st.cl].title}): expected response read over “${b.st.fault.name}”: the trainer stops the checklist anyway`);
+  for (let k = 2; k < STATIONS.length; k++) run(k);
+  const r = F.result();
+  check(F.finished && r.notes.some(n => /Good catch/.test(n)) && r.notes.some(n => /discrepancy missed/.test(n)) && r.notes.some(n => /wrong response/.test(n)) && r.notes.some(n => /out of order/.test(n)), `checklist trainer debrief: score ${r.score}; notes: ${r.notes.join(' · ')}`);
+}
+{ // memory mode: free recall with a reveal, self-graded
+  sys.reset('beforeStart'); const F = createFlow(sys, 'cltrain', 'memory', { rnd: () => 0.01 }); const C = sys.cl;
+  check(C.mode === 'memory', 'memory mode reaches the checklist runner');
+  C.recall('ok'); C.recall('missed'); const it = C.cur(); const r = !it.ok(sys) ? C.recall('stop') : C.recall('ok');
+  check(C.log.some(l => l.kind === 'wrong' && /not recalled/.test(l.extra)) && C.items.filter(x => x.state === 'done').length >= 2, `memory recall graded: ${C.log.map(l => l.kind).join(', ')}; last ${r}`);
 }
 console.log(ok ? '\nALL LOGIC TESTS PASSED' : '\nSOME LOGIC TESTS FAILED');
 process.exit(ok ? 0 : 1);

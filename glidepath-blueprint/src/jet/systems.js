@@ -5,6 +5,7 @@
 import { createAvionics, presetAvionics, avUpdate, fcuRule, FIELD_ELEV } from './avionics.js';
 import { createFDM, thrustOf, AF, KT, FT } from './fdm.js';
 import { createAutoflight, autoflight, leverN1 } from './autoflight.js';
+import { createChecklists } from './checklists.js';
 import { toSN, RWY, HOLD, TAXI_PATH, nearest, ELEV_FT, WIND } from './layout.js';
 
 export const DT = 1 / 30;
@@ -87,7 +88,8 @@ export function createSystems(opt = {}) {
   const emit = (type, data = {}) => sys.events.push({ type, ...data, t: sys.t });
 
   /* ---------------- initial states ---------------- */
-  sys.reset = (kind = 'cold') => {
+  sys.reset = (kind = 'cold', opts = {}) => {
+    if (sys.cl && !opts.keepChecklists) { sys.cl.reset(); sys.clGate = null; }
     sys.t = 0; sys.acc = 0; sys.events.length = 0; sys.fireInject = null;
     sys.sw = coldSwitches(); sys.st = freshState();
     sys.st.fdm = fdm; fdm.reset(kind === 'lineup' ? 'lineup' : 'park'); sys.st.brakes = { temp: fdm.brakeT };
@@ -171,7 +173,7 @@ export function createSystems(opt = {}) {
 
   function update(dt) {
     sys.t += dt;
-    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); motion(dt); cabin(dt); fctl(dt); avUpdate(sys); monitor(dt); alerts(dt); pages();
+    electrics(dt); irs(dt); apu(dt); bleed(dt); engines(dt); fuel(dt); hyd(dt); fire(dt); motion(dt); cabin(dt); fctl(dt); avUpdate(sys); monitor(dt); alerts(dt); pages(); if (sys.cl) sys.cl.update();
   }
 
   function electrics(dt) {
@@ -508,7 +510,7 @@ export function createSystems(opt = {}) {
     const nearHold = Math.abs(ns.s - HOLD.s) < 14;
     if (nearHold && ns.n > HOLD.n - 25 && ns.n < HOLD.n) { M.atHold = Fd.gs < 1; M.held = M.atHold ? M.held + dt : 0; } else { M.atHold = false; M.held = 0; }
     if (s.stopBar && nearHold && ns.n >= HOLD.n && ns.n < HOLD.n + 20 && !M.stopBarRun) { M.stopBarRun = true; emit('stopBarRun'); }
-    if (s.stopBar && M.held > 2) { s.stopBar = false; M.cleared = true; emit('cleared'); }
+    if (s.stopBar && M.held > 2 && (!sys.clGate || sys.clGate())) { s.stopBar = false; M.cleared = true; emit('cleared'); }   // cleared once stopped (and, in checklist scenarios, the BEFORE TAKE-OFF checklist is done to the line)
     const route = nearest(TAXI_PATH, sn.s, sn.n); M.route = route;
     // take-off roll: centre-line, callouts, rotation, lift-off, limits
     const v1 = s.av.fms.v1 || 135, vr = s.av.fms.vr || 140, toRoll = Fd.onGround && onRwy && Math.min(w.thr1, w.thr2) >= 0.9;
@@ -654,6 +656,7 @@ export function createSystems(opt = {}) {
   };
 
   sys.emit = emit;
+  sys.cl = createChecklists(sys);
   sys.alignRemaining = () => { const al = sys.st.irs.filter(r => r.mode === 'NAV' && !r.aligned); if (!al.length) return 0; return Math.max(...al.map(r => (r.test > 0 ? 1 : 1 - r.prog))) * (sys.fast ? REF.irsAlignFast : REF.irsAlign); };
   sys.reset('cold');
   return sys;

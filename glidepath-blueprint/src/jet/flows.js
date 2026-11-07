@@ -5,9 +5,10 @@
 
 import { CTL, fmsId } from './controls.js';
 import { fmsStatus, fmsNext } from './avionics.js';
+import { CHECKLISTS, STATIONS, setupStation, checklistNotes } from './checklists.js';
 
 export const PHASES = { power: 'Power-up', scan: 'Overhead scan', apu: 'APU start', fms: 'Flight computer', before: 'Before start', start: 'Engine start', man: 'Manual start', after: 'After start', fire: 'Engine fire drill',
-  push: 'Pushback', btaxi: 'Before taxi', taxi: 'Taxi', lineup: 'Line-up', to: 'Take-off', ato: 'After take-off', rto: 'Rejected take-off' };
+  push: 'Pushback', cl: 'Checklists', btaxi: 'Before taxi', taxi: 'Taxi', lineup: 'Line-up', to: 'Take-off', ato: 'After take-off', rto: 'Rejected take-off' };
 const lv = (s, id) => s.sw[id];
 const both = (s, v) => Math.abs(s.sw.thr1 - v) < 0.07 && Math.abs(s.sw.thr2 - v) < 0.07;
 const FMS_KEYS = Object.keys(CTL).filter(id => CTL[id].k === 'key');
@@ -103,6 +104,12 @@ export const STEPS = {
   thrCL: { ph: 'ato', kind: 'set', t: 'THRUST LEVERS — CL at LVR CLB', where: 'Pedestal · thrust levers', ctl: ['thr1', 'thr2'], want: { thr1: 1, thr2: 1 }, done: s => both(s, 1) && !s.st.fdm.onGround, tip: 'At about 1500 ft the FMA flashes LVR CLB. In CL the autothrust takes over: THR CLB.' },
   flapsUp: { ph: 'ato', kind: 'set', t: 'FLAPS — 0 at the S speed', where: 'Pedestal · FLAPS', ctl: ['flaps'], done: s => s.sw.flaps === 0, tip: 'Retract when the speed passes the green S on the speed tape.' },
   levelOff: { ph: 'ato', kind: 'wait', t: 'Level off at 5000 ft (FMA: ALT)', where: 'PFD and FCU altitude', look: 'pfd', done: s => s.st.af.vert === 'ALT' && Math.abs(s.st.fdm.alt - s.st.av.fcu.alt) < 120 },
+  // ---------- written normal checklists (read after the flows; the pilot monitoring reads, you respond) ----------
+  clBeforeStart: { ph: 'before', kind: 'checklist', cl: 'beforeStart', part: 'all', t: 'BEFORE START checklist', where: 'Checklist card: the pilot monitoring reads, you respond', look: 'ewd', done: s => s.cl.isDone('beforeStart') },
+  clAfterStart: { ph: 'after', kind: 'checklist', cl: 'afterStart', part: 'all', t: 'AFTER START checklist', where: 'Checklist card', look: 'ewd', done: s => s.cl.isDone('afterStart') },
+  clBeforeTO: { ph: 'taxi', kind: 'checklist', cl: 'beforeTO', part: 'above', t: 'BEFORE TAKE-OFF checklist, down to the line', where: 'At the holding point · checklist card', look: 'ewd', done: s => s.cl.isDone('beforeTO', 'above') },
+  clBeforeTOBelow: { ph: 'lineup', kind: 'checklist', cl: 'beforeTO', part: 'below', t: 'BEFORE TAKE-OFF checklist, below the line', where: 'Lined up · checklist card', look: 'pfd', done: s => s.cl.isDone('beforeTO', 'below') },
+  clAfterTO: { ph: 'ato', kind: 'checklist', cl: 'afterTO', part: 'all', t: 'AFTER TAKE-OFF / CLIMB checklist', where: 'Checklist card', look: 'pfd', done: s => s.cl.isDone('afterTO') },
   // ---------- rejected take-off ----------
   rtoThrust: { ph: 'rto', kind: 'set', t: 'THRUST LEVERS — FLX', where: 'Pedestal · thrust levers', ctl: ['thr1', 'thr2'], want: { thr1: 2, thr2: 2 }, done: s => s.sw.thr1 >= 1.94 && s.sw.thr2 >= 1.94 },
   rtoMon: { ph: 'rto', kind: 'wait', t: 'Monitor the take-off roll: speed, engines, alerts', where: 'PFD and upper display', look: 'ewd', done: s => !!(s.st.rtoInject && s.st.rtoInject.fired) },
@@ -131,19 +138,23 @@ export const STEPS = {
 
 const PREP = ['batv', 'bat1', 'bat2', 'ext', 'irs', 'crewOxy', 'fireTest', 'hydChk', 'fuelPumps', 'elecChk', 'airChk', 'antiIce', 'press', 'navLt', 'belts', 'noSmk', 'emerExit', 'annTest', 'rightCol', 'apuMaster', 'apuStart', 'apuAvail', 'apuBleed', 'extOff', 'fms', 'irsAligned'];
 const BEFORE = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart'];
-const TAXI_TO = ['parkOffPush', 'callPush', 'pushWait', 'parkSetPush', 'flapsTO', 'spoilersArm', 'abMax', 'fctlChk', 'toConfig', 'parkOffTaxi', 'taxiHold', 'holdShort', 'lineLights', 'xpdrOn', 'lineUp', 'chrono',
-  'thrustSet', 'c100', 'cV1', 'rotate', 'posClimb', 'gearUp', 'ap1On', 'thrCL', 'flapsUp', 'levelOff'];
+const TAXI_TO = ['parkOffPush', 'callPush', 'pushWait', 'parkSetPush', 'clAfterStart', 'flapsTO', 'spoilersArm', 'abMax', 'fctlChk', 'toConfig', 'parkOffTaxi', 'taxiHold', 'clBeforeTO', 'holdShort', 'lineLights', 'xpdrOn', 'lineUp', 'chrono',
+  'clBeforeTOBelow', 'thrustSet', 'c100', 'cV1', 'rotate', 'posClimb', 'gearUp', 'ap1On', 'thrCL', 'flapsUp', 'clAfterTO', 'levelOff'];
 const FIRE_A = [...BEFORE, 'm2on', 'e2ign', 'e2mon', 'mwSil', 'thr2Idle', 'm2off', 'fire2pb', 'wait10', 'agent1'];
 const START = ['beacon', 'parkBrk', 'thrIdle', 'packsOff', 'apuBleedChk', 'ignStart', 'm2on', 'e2ign', 'e2lit', 'e2idle', 'm1on', 'e1start', 'e1idle', 'modeNorm', 'apuBleedOff', 'packsOn', 'apuOff', 'sdCheck', 'flaps'];
+const START_BS = START.flatMap(id => id === 'ignStart' ? ['clBeforeStart', 'ignStart'] : [id]);   // BEFORE START checklist after the before-start flow, before the start
+// checklist-trainer stations: the systems are set to the state each list is read in, with one random fault
+STATIONS.forEach((st, i) => { STEPS['clStation' + i] = { ph: 'cl', kind: 'checklist', cl: st.key, part: st.part, station: i, t: `${CHECKLISTS[st.key].title}${st.part === 'above' ? ' (to the line)' : st.part === 'below' ? ' (below the line)' : ''} — find the fault`, where: st.where, look: 'ewd', done: s => s.cl.isDone(st.key, st.part) }; });
 export const SCENARIOS = {
   prep: { title: 'Cockpit preparation', init: 'cold', steps: PREP },
-  start: { title: 'Engine start', init: 'beforeStart', steps: START },
-  full: { title: 'Cold & dark to engines running', init: 'cold', steps: [...PREP, ...START] },
+  start: { title: 'Engine start', init: 'beforeStart', steps: [...START_BS, 'clAfterStart'] },
+  full: { title: 'Cold & dark to engines running', init: 'cold', steps: [...PREP, ...START_BS, 'clAfterStart'] },
   fire: { title: 'Engine fire during start', init: 'beforeStart', fire: { eng: 1, n2: 36 }, steps: [...FIRE_A, 'fireOut', 'modeNormF', 'inform'] },
   fire2: { title: 'Engine fire: second bottle', init: 'beforeStart', fire: { eng: 1, n2: 36, persist: true }, steps: [...FIRE_A, 'fireStill', 'agent2', 'fireOut2', 'modeNormF', 'inform'] },
   manual: { title: 'Manual engine start', init: 'beforeStart', steps: [...BEFORE, 'man2on', 'man2n2', 'man2master', 'man2lit', 'man2idle', 'man2off', 'modeNorm', 'apuBleedOff', 'packsOn'] },
   taxi: { title: 'Taxi and take-off', init: 'stand', moving: true, steps: TAXI_TO, judge: judgeDeparture },
-  departure: { title: 'Full departure', init: 'cold', moving: true, steps: [...PREP, ...START.filter(id => id !== 'flaps'), ...TAXI_TO], judge: judgeDeparture },
+  departure: { title: 'Full departure', init: 'cold', moving: true, steps: [...PREP, ...START_BS.filter(id => id !== 'flaps'), ...TAXI_TO], judge: judgeDeparture },
+  cltrain: { title: 'Checklist trainer', init: 'beforeStart', moving: true, steps: STATIONS.map((st, i) => 'clStation' + i) },
   rto: { title: 'Rejected take-off', init: 'lineup', moving: true, rto: { ias: 95 }, steps: ['rtoThrust', 'rtoMon', 'rtoIdle', 'rtoBrake', 'rtoStop', 'rtoPark', 'rtoInform'], judge: judgeRTO }
 };
 /* scoring of the flying itself (debrief “Timing and handling” notes, with penalties) */
@@ -171,9 +182,12 @@ export const FREE = new Set(['masterWarn', 'masterCaut', 'masterWarnL', 'masterW
 
 // continuous flying controls: never wrong while the aircraft moves
 const MOVING_FREE = new Set(['thr1', 'thr2', 'parkBrk', 'gear', 'flaps', 'spdBrk', 'stickL', 'tiller', 'toConfig', 'chrono', 'push', 'autoBrkMax', 'autoBrkLo', 'autoBrkMed', 'sdFCTL', 'nose', 'landL', 'landR', 'strobe', 'rwyTurn', 'xpdr']);
-export function createFlow(sys, key, mode = 'guided') {
+export function createFlow(sys, key, mode = 'guided', opts = {}) {
   const sc = SCENARIOS[key];
+  const clReminded = new Set(), clNotes = [];
   const F = { key, title: sc.title, mode, steps: sc.steps.map((id, i) => ({ id, i, ...STEPS[id], state: 'pending', touch: false, at: -1, order: -1 })), cur: 0, errors: [], t0: sys.t, tEnd: -1, finished: false, seq: 0, last: null };
+  F.rnd = opts.rnd || Math.random;
+  sys.clGate = sc.steps.includes('clBeforeTO') ? () => sys.cl.isDone('beforeTO', 'above') : null;
   const n = () => F.steps.length;
   const cur = () => F.steps[F.cur] || null;
   const fb = (type, step, msg) => (F.last = { type, step, msg, t: sys.t });
@@ -185,8 +199,11 @@ export function createFlow(sys, key, mode = 'guided') {
       if (!s) { finish(); return; }
       if (s.state !== 'pending' && s.state !== 'current') { F.cur++; continue; }
       if (s.when && !s.when(sys)) { s.state = 'na'; F.cur++; continue; }
-      if (s.state === 'pending') { s.state = 'current'; s.since = sys.t; s.touch = s.kind === 'set' && s.done(sys); }
-      if ((s.kind === 'wait' || (s.kind === 'set' && s.engaged)) && s.done(sys)) { complete(s, 'done'); F.cur++; continue; }
+      if (s.state === 'pending') {
+        s.state = 'current'; s.since = sys.t; s.touch = s.kind === 'set' && s.done(sys);
+        if (s.kind === 'checklist') { if (s.station != null) { s.fault = setupStation(sys, STATIONS[s.station], F.rnd); sys.cl.done[s.cl + ':' + s.part] = false; sys.cl.done[s.cl + ':all'] = false; sys.cl.items = []; } sys.cl.mode = F.mode; sys.cl.start(s.cl, s.part); }
+      }
+      if ((s.kind === 'wait' || s.kind === 'checklist' || (s.kind === 'set' && s.engaged)) && s.done(sys)) { complete(s, 'done'); F.cur++; continue; }
       return;
     }
   }
@@ -211,9 +228,16 @@ export function createFlow(sys, key, mode = 'guided') {
     return false;
   };
   /** Called after a control was operated. */
+  /** guided mode: a control of a later step while a checklist is being read is held back with a reminder */
+  F.blocked = (ctl) => { const s = cur(); if (F.finished || F.mode !== 'guided' || !s || s.kind !== 'checklist' || s.done(sys)) return null; const later = F.steps.slice(F.cur + 1).find(q => q.ctl && q.ctl.includes(ctl)); return later ? `Finish the ${CHECKLISTS[s.cl].title} checklist first` : null; };
   F.operated = (ctl) => {
     if (F.finished) return null;
     const s = cur();
+    if (s && s.kind === 'checklist' && !s.done(sys)) {
+      const later = F.steps.slice(F.cur + 1).find(q => q.ctl && q.ctl.includes(ctl));
+      if (later && !clReminded.has(s.id)) { clReminded.add(s.id); clNotes.push({ text: `Started “${later.t}” before finishing the ${CHECKLISTS[s.cl].title} checklist`, pen: 5 }); fb('hint', s, `Reminder: finish the ${CHECKLISTS[s.cl].title} checklist first`); }
+      if (!later) return null;   // fixing a discrepancy or looking at something while reading: never counted wrong
+    }
     if (s && s.ctl && s.ctl.includes(ctl) && s.kind === 'set') {
       s.touch = false; s.engaged = true;
       if (s.done(sys)) { complete(s, 'done'); F.cur++; settle(); return fb('ok', s, 'Done'); }
@@ -238,7 +262,9 @@ export function createFlow(sys, key, mode = 'guided') {
     const counted = F.steps.filter(s => s.state !== 'na');
     const inOrder = counted.filter(s => s.state === 'done').length, late = counted.filter(s => s.state === 'late').length, missed = counted.filter(s => s.state === 'missed');
     const wrong = F.errors.length;
-    const J = sc.judge && F.steps.some(s => s.state === 'done' || s.state === 'late') ? sc.judge(sys) : [];
+    const J = [...(sc.judge && F.steps.some(s => s.state === 'done' || s.state === 'late') ? sc.judge(sys) : []), ...clNotes, ...checklistNotes(sys.cl),
+      ...F.steps.filter(s => s.kind === 'checklist' && s.state === 'missed').map(s => ({ text: `Missed checklist: ${s.t}`, pen: 0 })),
+      ...F.steps.filter(s => s.station != null && s.fault && s.state !== 'pending').map(s => ({ text: `${CHECKLISTS[s.cl].title}: injected fault was “${s.fault.name}”`, pen: 0 }))];
     const pen = F.steps.reduce((t, s) => t + (s.penalty ? s.penalty(sys) : 0), 0) + J.reduce((t, j) => t + (j.pen || 0), 0);
     const score = Math.max(0, Math.round(100 * (inOrder + 0.5 * late) / Math.max(1, counted.length)) - Math.min(20, wrong * 2) - pen);
     const notes = F.steps.filter(s => s.note).map(s => s.note(sys)).filter(Boolean);

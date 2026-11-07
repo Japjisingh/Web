@@ -112,6 +112,40 @@ const CSS = `
   .jh-dock.sheet{display:flex;left:0;right:0;top:auto;bottom:0;width:auto;height:62cqh;border-radius:16px 16px 0 0}
 }
 @container jhud (max-height: 380px){ .jh-why{display:none} .jh-dock{top:56px} }
+/* written checklist card (challenge . . . response) */
+.jh-cl{position:absolute;left:12px;top:62px;width:min(410px,44cqw);max-height:calc(100cqh - 196px);display:none;flex-direction:column;padding:0;border-radius:16px;overflow:hidden}
+.jh-cl.show{display:flex}
+.jh-cl .hd{display:flex;align-items:center;gap:10px;padding:10px 12px 9px 14px;border-bottom:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);flex:none}
+.jh-cl .hd .tt{font:700 16px/1.1 var(--f-display,sans-serif);letter-spacing:.06em;flex:1}
+.jh-cl .hd .mic{width:30px;height:30px;padding:0!important;display:grid;place-items:center}
+.jh-cl ol{list-style:none;margin:0;padding:6px 0;flex:1 1 auto;min-height:44px;overflow:auto}
+.jh-cl .clstop,.jh-cl .clq,.jh-cl .clopts,.jh-cl .clok{flex:none}
+.jh-cl li{display:flex;align-items:baseline;gap:6px;padding:5px 14px;font:600 12.5px/1.25 var(--f-mono,monospace);color:#93a9b3;cursor:default}
+.jh-cl li .c{white-space:nowrap}
+.jh-cl li .d{flex:1;border-bottom:2px dotted rgba(255,255,255,.22);transform:translateY(-3px);min-width:12px}
+.jh-cl li .r{text-align:right;color:#cfe3ea;max-width:58%}
+.jh-cl li i{font-style:normal;width:14px;text-align:center;color:#62d3a1}
+.jh-cl li.done{color:#d7e3e8}.jh-cl li.done .r{color:#62d3a1}
+.jh-cl li.cur{background:rgba(231,126,194,.16);color:#fff;box-shadow:inset 3px 0 0 #e77ec2}.jh-cl li.cur .r{color:#ffd2ec}
+.jh-cl li.stopped{background:rgba(255,80,60,.16);color:#fff;box-shadow:inset 3px 0 0 #ff5a46}
+.jh-cl li.pend{cursor:pointer}
+.jh-cl li.sep{display:block;text-align:center;font:700 10.5px/1 var(--f-mono,monospace);letter-spacing:.14em;color:#e6b347;padding:7px 14px;cursor:default}
+.jh-cl li.sep::before,.jh-cl li.sep::after{content:'';display:inline-block;width:22%;border-top:1px dashed rgba(230,179,71,.6);vertical-align:middle;margin:0 8px}
+.jh-cl .clstop{margin:0 12px 8px;padding:9px 11px;border-radius:10px;background:rgba(120,14,10,.55);border:1px solid rgba(255,90,70,.55);color:#ffd9d4;font:600 13px/1.3 var(--f-body,system-ui)}
+.jh-cl .clstop b{display:block;font:700 14px/1.2 var(--f-display,sans-serif);letter-spacing:.04em}
+.jh-cl .clopts{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 12px}
+.jh-cl .clopts button{border-radius:10px;padding:8px 10px;font:600 12px/1.15 var(--f-mono,monospace);text-align:left;flex:1 1 140px}
+.jh-cl .clopts button.stopB{border-color:rgba(255,90,70,.6);color:#ffb4aa}
+.jh-cl .clq{padding:2px 14px 6px;font:600 12px/1.3 var(--f-body,system-ui);color:#b9c9cf}
+.jh-cl .clok{padding:4px 14px 12px;color:#62d3a1;font:700 14px/1.2 var(--f-display,sans-serif);letter-spacing:.05em}
+.jhud.clOn .jh-fly{display:none}
+@container jhud (max-width: 1000px){ .jh-cl{width:min(380px,56cqw)} }
+@container jhud (max-width: 600px){
+  .jh-cl{left:0;right:0;top:auto;bottom:0;width:auto;max-height:64cqh;border-radius:16px 16px 0 0;border-top:3px solid #e6b347}
+  .jhud.clOn .jh-step,.jhud.clOn .jh-dock.sheet{display:none}
+  .jh-cl.show{max-height:82cqh}.jh-cl ol{min-height:56px}.jh-cl .hd{padding:6px 10px}
+  .jh-cl li{padding:4px 10px;font-size:11.5px}.jh-cl .clopts{padding:4px 8px 8px;gap:5px}.jh-cl .clopts button{flex:1 1 40%;padding:7px 8px;font-size:11px}.jh-cl .clq{padding:2px 10px 4px}
+}
 /* callout pill (speed callouts, ATC and ground-crew messages) */
 .jh-co{position:absolute;left:50%;top:100px;transform:translateX(-50%);padding:9px 18px;border-radius:999px;font:700 20px/1 var(--f-display,sans-serif);letter-spacing:.03em;opacity:0;transition:opacity .35s;pointer-events:none!important;white-space:nowrap}
 .jh-co.show{opacity:1}.jh-co.W{background:rgba(120,14,10,.7);border-color:rgba(255,90,70,.6);color:#ffd9d4}
@@ -176,6 +210,7 @@ export function createHUD(wrap, api) {
   <div class="g jh-edge" role="button" tabindex="0"><b>➜</b><span></span></div>
   <div class="g jh-tip"></div>
   <div class="g jh-co" aria-live="assertive"></div>
+  <div class="g jh-cl" role="dialog" aria-label="Normal checklist"><div class="hd"><span class="k">Checklist</span><b class="tt"></b><button class="mic" aria-pressed="false" aria-label="Say the response (speech input)" title="Say the response" hidden>🎙</button></div><ol></ol><div class="clstop" hidden></div><div class="clq"></div><div class="clopts"></div><div class="clok" hidden></div></div>
   <div class="g jh-help" role="dialog" aria-label="Flying controls help"><h4>Flying controls</h4><table>
     <tr><td>W / S</td><td>Sidestick forward / back (pitch). The aircraft holds its attitude when you let go.</td></tr>
     <tr><td>A / D</td><td>Sidestick left / right (roll)</td></tr>
@@ -278,6 +313,42 @@ export function createHUD(wrap, api) {
   H.hideDebrief = () => H.deb.classList.remove('show');
   // callout pill
   let coT = 0; H.callout = (t, lvl = '') => { const c = q('.jh-co'); c.textContent = t; c.className = 'g jh-co show ' + lvl; clearTimeout(coT); coT = setTimeout(() => c.classList.remove('show'), lvl ? 3500 : 2200); };
+  // written checklist card: printed challenge . . . response, ticks, current item, the line; response buttons
+  H.cl = (() => {
+    const el = q('.jh-cl'), ol = el.querySelector('ol'), stop = el.querySelector('.clstop'), opts = el.querySelector('.clopts'), qq = el.querySelector('.clq'), okEl = el.querySelector('.clok'), mic = el.querySelector('.mic'), tt = el.querySelector('.tt');
+    let lastKey = '', reveal = false, showUntil = 0;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null, listening = false;
+    if (SR) { mic.hidden = false; mic.addEventListener('click', () => { if (listening) { try { rec.stop(); } catch (e) { /* stopped */ } return; } try { rec = new SR(); rec.lang = 'en-GB'; rec.interimResults = false; rec.maxAlternatives = 3;
+      rec.onresult = ev => { const alts = [...ev.results[0]].map(a => a.transcript); api.clSpeech && api.clSpeech(alts); }; rec.onend = () => { listening = false; mic.setAttribute('aria-pressed', 'false'); mic.classList.remove('on'); }; rec.onerror = rec.onend;
+      rec.start(); listening = true; mic.setAttribute('aria-pressed', 'true'); mic.classList.add('on'); } catch (e) { listening = false; } }); }
+    ol.addEventListener('click', e => { const li = e.target.closest('li[data-i]'); if (li && li.classList.contains('pend')) api.clJump && api.clJump(+li.dataset.i); });
+    opts.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.rv) { reveal = true; lastKey = ''; return; } if (b.dataset.g) { reveal = false; api.clRecall && api.clRecall(b.dataset.g); return; } api.clAnswer && api.clAnswer(+b.dataset.o); });
+    return { el, render(C, sys, t) {
+      const D = C.def(); const on = !!D && (C.status === 'active' || C.status === 'stopped' || t < showUntil);
+      if (D && C.status === 'done' && C._doneSeen !== C.key + C.part) { C._doneSeen = C.key + C.part; showUntil = t + 3; }
+      el.classList.toggle('show', on); root.classList.toggle('clOn', on); if (!on) { lastKey = ''; return; }
+      const mode = C.mode || 'guided', it = C.cur();
+      const key = JSON.stringify([C.key, C.part, C.status, C.idx, C.items.map(x => x.state), mode, reveal, it && it.ok(sys)]);
+      if (key === lastKey) return; lastKey = key;
+      tt.textContent = D.title + (C.part === 'above' ? ' · to the line' : C.part === 'below' ? ' · below the line' : '');
+      let html = '', sepDone = false;
+      D.items.forEach((x, i) => {
+        if (x.below && !sepDone) { sepDone = true; html += '<li class="sep">BELOW THE LINE</li>'; }
+        const st = C.items[i] ? C.items[i].state : 'pending', inP = C.part === 'all' || (C.part === 'below' ? !!x.below : !x.below);
+        const cls = st === 'done' ? 'done' : i === C.idx ? (C.status === 'stopped' ? 'stopped' : 'cur') : inP ? 'pend' : '';
+        const r = st === 'done' || mode === 'guided' ? (typeof x.r === 'function' ? x.r(sys) : x.r) : '· · ·';
+        html += `<li class="${cls}" data-i="${i}"><span class="c">${x.c}</span><span class="d"></span><span class="r">${r}</span><i>${st === 'done' ? '✓' : ''}</i></li>`;
+      });
+      ol.innerHTML = html;
+      stop.hidden = C.status !== 'stopped'; if (C.status === 'stopped' && it) stop.innerHTML = `<b>CHECKLIST STOPPED</b>${it.why}. Fix it — the checklist resumes by itself.`;
+      okEl.hidden = C.status !== 'done'; okEl.textContent = C.status === 'done' ? `${D.title} checklist complete${C.part === 'above' ? ' down to the line' : ''}` : '';
+      qq.textContent = C.status === 'active' && it ? (mode === 'memory' ? `PM: “${it.c}” — say the response, then reveal it` : `PM: “${it.c}” — respond`) : '';
+      if (C.status !== 'active' || !it) { opts.innerHTML = ''; return; }
+      if (mode === 'memory') opts.innerHTML = reveal ? `<button data-g="ok">✓ Said “${typeof it.r === 'function' ? it.r(sys) : it.r}”</button><button data-g="missed">Missed it</button>${it.why ? '<button data-g="stop" class="stopB">STOP — not as required</button>' : ''}` : '<button data-rv="1">Reveal the response</button>';
+      else opts.innerHTML = C.options().map((o, i) => `<button data-o="${i}" class="${o.startsWith('STOP') ? 'stopB' : ''}">${o}</button>`).join('');
+      { const c = ol.querySelector('li.cur,li.stopped'); if (c) { const top = c.offsetTop - ol.offsetTop - 30; if (top < ol.scrollTop || top > ol.scrollTop + ol.clientHeight - 40) ol.scrollTop = Math.max(0, top); } }
+    } };
+  })();
   H.toggleHelp = (o) => { const h = q('.jh-help'); h.classList.toggle('open', o ?? !h.classList.contains('open')); };
   // on-screen flying controls: spring-loaded stick and tiller, thrust slider with detents, hold-to-brake
   H.fly = (() => {
