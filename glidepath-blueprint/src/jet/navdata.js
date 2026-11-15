@@ -6,7 +6,7 @@ const en = (sx, nx) => { const p = P(sx, nx), q = toEN(p.x, p.z); return [q.e, q
 const R27 = { a: en(RWY.s0, RWY.n), b: en(RWY.s1, RWY.n) };   // runway geometry follows the 3D airport (layout.js)
 export const AIRPORTS = {
   ZZAA: { e: 0, n: 0, elev: 420, name: 'GLIDEPATH FIELD', rwys: { '27R': { hdg: 274, a: R27.a, b: R27.b, ils: { f: 109.9, id: 'IZZA' } }, '09L': { hdg: 94, a: R27.b, b: R27.a } } },
-  ZZBB: { e: -182, n: 41, elev: 160, name: 'WESTPORT', rwys: { '09': { hdg: 94, a: [-182.8, 41.05], b: [-181.2, 40.95], ils: { f: 110.3, id: 'IZZB' } }, '27': { hdg: 274, a: [-181.2, 40.95], b: [-182.8, 41.05] } } },
+  ZZBB: { e: -182, n: 41, elev: 160, name: 'WESTPORT', rwys: { '09': { hdg: 94, a: [-182.8, 41.05], b: [-181.2, 40.95] }, '27': { hdg: 274, a: [-181.2, 40.95], b: [-182.8, 41.05], ils: { f: 110.3, id: 'IZZB' } } } },
   ZZAC: { e: -58, n: -44, elev: 900, name: 'RIDGE', rwys: {} },
   ZZAD: { e: 34, n: 66, elev: 60, name: 'NORTHBAY', rwys: {} },
   ZZAE: { e: -121, n: 79, elev: 1200, name: 'HIGHMOOR', rwys: {} }

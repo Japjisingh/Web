@@ -18,7 +18,7 @@ const towards = (x, t, rate, dt) => x + clamp(t - x, -rate * dt, rate * dt);
 export const AF = {
   m: 64000, S: 122.6,
   Tmax: 120000, n1Toga: 92,                          // per engine, sea level static at TOGA N1
-  CLa: 5.1, CL0: [0.24, 0.74, 0.86, 1.0, 1.18], CLmax: [1.42, 1.95, 2.15, 2.35, 2.6], aMax: [11.5, 14, 14.5, 15, 15.5],
+  CLa: 5.1, CL0: [0.24, 0.74, 0.86, 0.95, 1.05], CLmax: [1.42, 1.95, 2.15, 2.35, 2.6], aMax: [11.5, 14, 14.5, 15, 15.5],
   CD0: 0.0215, CDflap: [0, 0.009, 0.021, 0.035, 0.062], CDgear: 0.018, k: 0.047,
   VFE: [350, 230, 200, 185, 177], VLO: 220, VLE: 280, VMO: 350,
   mu0: 0.0085, mu1: 0.0005, muBrk: 0.48, muBrkWet: 0.28, brakeCap: 71000,

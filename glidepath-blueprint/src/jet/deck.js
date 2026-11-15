@@ -364,10 +364,10 @@ export function buildDeck(renderer) {
     const P = createPanel({ name: 'PED', w: 0.42, h: 0.66, paint: '#47535e', ppm: 3000, maxPx: 2048, atlas: [1024, 1024], max: 80 });
     // thrust lever quadrant
     P.module('THR', '', 0.12, 0.004, 0.30, 0.268);
-    const vp = 0.15, detA = [-20, 6, 15, 24], tl = ['IDLE', 'CL', 'FLX MCT', 'TOGA'];
+    const vp = 0.15, detA = [-36, -20, 6, 15, 24], tl = ['REV', 'IDLE', 'CL', 'FLX MCT', 'TOGA'];
     P.draw((x, px) => { for (const u of [0.185, 0.235]) { x.fillStyle = '#0c0e10'; x.beginPath(); x.roundRect(px(u - 0.006), px(0.04), px(0.012), px(0.21), px(0.006)); x.fill(); }
       x.font = `700 ${px(0.0044)}px ${FONT}`; x.fillStyle = '#f2f4f5';
-      detA.forEach((a, i) => { const v = vp - 0.075 * Math.tan(a * D2R) * 1.35; x.textAlign = 'right'; x.fillText(tl[i], px(0.168), px(v)); x.textAlign = 'left'; x.fillText(tl[i], px(0.252), px(v)); x.fillRect(px(0.17), px(v) - 1, px(0.008), 2); x.fillRect(px(0.242), px(v) - 1, px(0.008), 2); });
+      detA.forEach((a, i) => { if (!i) return; const v = vp - 0.075 * Math.tan(a * D2R) * 1.35; x.textAlign = 'right'; x.fillText(tl[i], px(0.168), px(v)); x.textAlign = 'left'; x.fillText(tl[i], px(0.252), px(v)); x.fillRect(px(0.17), px(v) - 1, px(0.008), 2); x.fillRect(px(0.242), px(v) - 1, px(0.008), 2); });
       x.textAlign = 'right'; x.fillText('REV', px(0.168), px(0.235)); x.textAlign = 'left'; x.fillText('REV', px(0.252), px(0.235)); });
     for (const [n, u] of [[1, 0.185], [2, 0.235]]) {
       const p = P.local(u, vp); const piv = new THREE.Group(); piv.position.set(p.x, p.y, -0.07); P.group.add(piv);
@@ -389,7 +389,7 @@ export function buildDeck(renderer) {
       const p = P.local(0.064, 0.145); const piv = new THREE.Group(); piv.position.set(p.x, p.y, -0.07); P.group.add(piv);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.01, 0.13), M.darkMetal); arm.position.z = 0.065; piv.add(arm);
       const h = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.02, 0.016, 3, 0.006), M.knobGrey); h.position.z = 0.135; piv.add(h);
-      P.custom('spdBrk', piv, 'lever', { u: 0.064, v: 0.145, size: 0.05, ang: [33, 33], axis: 'x', tipZ: 0.14, lift: [0, 0.012] });
+      P.custom('spdBrk', piv, 'lever', { u: 0.064, v: 0.145, size: 0.05, ang: [33, 33, -4, -40], axis: 'x', tipZ: 0.14, lift: [0, 0.012, 0, 0] });
     }
     {
       const p = P.local(0.356, 0.145); const piv = new THREE.Group(); piv.position.set(p.x, p.y, -0.07); P.group.add(piv);
@@ -506,7 +506,7 @@ export function buildDeck(renderer) {
       else if (C.kind === 'rot') { const i = c.pos.indexOf(v); const a = C.ang[Math.max(0, i)] * D2R; C.a = C.a == null ? a : C.a + (a - C.a) * k; C.piv.rotation.z = -C.a; }
       else if (C.kind === 'lever' || C.kind === 'master') {
         let i = c.k === 'master' ? (v ? 1 : 0) : c.pos.indexOf(v); let a;
-        if (i < 0 && typeof v === 'number') { const i0 = Math.max(0, Math.min(C.ang.length - 2, Math.floor(v))), f = Math.min(1, v - i0); a = (C.ang[i0] + (C.ang[i0 + 1] - C.ang[i0]) * f) * D2R; i = Math.round(v); }
+        if (i < 0 && typeof v === 'number') { const vb = v - (typeof c.pos[0] === 'number' ? c.pos[0] : 0), i0 = Math.max(0, Math.min(C.ang.length - 2, Math.floor(vb))), f = Math.max(0, Math.min(1, vb - i0)); a = (C.ang[i0] + (C.ang[i0 + 1] - C.ang[i0]) * f) * D2R; i = Math.round(v); }
         else a = C.ang[Math.min(C.ang.length - 1, Math.max(0, i))] * D2R;
         const lift = Array.isArray(C.lift) ? C.lift[i] || 0 : 0;
         if (C.a == null) { C.a = a; C.l = lift; }

@@ -2,6 +2,7 @@
    transponder and a deliberately simplified flight computer (keypad, scratchpad, INIT / F-PLN / PERF pages).
    Our own simplified design and wording, not any manufacturer's system. No three.js (runs in Node for tests). */
 import { AIRPORTS } from './navdata.js';
+import { AF } from './fdm.js';
 
 const OAT = 15;                  // deg C, same as the systems model
 export const QNH_TODAY = 1009;   // sea-level pressure at the fictional departure field today (hPa)
@@ -15,7 +16,8 @@ export function createAvionics() {
     baro: [{ hpa: 1013.25, std: false }, { hpa: 1013.25, std: false }],
     radio: { VHF1: { act: 121800, sby: 118700 }, VHF2: { act: 131725, sby: 123450 }, VHF3: { act: 136975, sby: 131550 } },
     xpdr: { code: '2000', entry: '', identT: -1 },
-    fms: { from: '', to: '', flt: '', ci: null, crz: null, baro: null, depRwy: '', arrRwy: '', v1: null, vr: null, v2: null, flex: null, u: [{ page: 'INIT', sp: '', msg: '' }, { page: 'INIT', sp: '', msg: '' }] },
+    fms: { from: '', to: '', flt: '', ci: null, crz: null, baro: null, depRwy: '', arrRwy: '', v1: null, vr: null, v2: null, flex: null, u: [{ page: 'INIT', sp: '', msg: '' }, { page: 'INIT', sp: '', msg: '' }],
+      appr: null, aQnh: null, aTemp: null, aWind: null, vappMan: null, dh: null, mda: null, ldgConf: 4, apprPhase: false },
     turns: {}, // knob detent counters for the 3D animation
     kick: {}   // last push / pull per knob { t, dir }
   };
@@ -25,6 +27,26 @@ export function presetAvionics(av) {
   Object.assign(av.fms, { from: 'ZZAA', to: 'ZZBB', flt: 'GPX101', ci: 30, crz: 350, baro: { hpa: QNH_TODAY, unit: 'hPa' }, depRwy: '27R', arrRwy: '09', v1: 135, vr: 140, v2: 145, flex: 45 });
   av.fms.u.forEach(u => { u.page = 'PERF'; });
   av.baro.forEach(b => { b.hpa = QNH_TODAY; b.std = false; });
+}
+/* the approaches the trainer can fly: all of them lead to the 3D runway (the destination's ILS 27 uses the same 3D airport as a stand-in) */
+export const APPROACHES = {
+  ZZAA: [{ id: 'ILS27R', apt: 'ZZAA', rwy: '27R', ils: 'IZZA', f: 109.9, crs: 274 }],
+  ZZBB: [{ id: 'ILS27', apt: 'ZZBB', rwy: '27', ils: 'IZZB', f: 110.3, crs: 274 }]
+};
+export function approachList(f) { const l = [...(APPROACHES[f.to] || [])]; if (f.from && f.from !== f.to) l.push(...(APPROACHES[f.from] || []).map(a => ({ ...a, ret: true }))); return l; }
+/* arrival set up as a crew would have it on the approach (approach scenarios) */
+export function presetArrival(av, o = {}) {
+  presetAvionics(av); const f = av.fms;
+  Object.assign(f, { appr: { ...APPROACHES.ZZAA[0] }, arrRwy: '27R', from: 'ZZBB', to: 'ZZAA', flt: 'GPX102', aQnh: QNH_TODAY, aTemp: 15, aWind: o.wind ? { from: o.wind.from, kt: o.wind.kt } : { from: 250, kt: 8 }, dh: o.dh ?? 200, mda: null, ldgConf: 4, apprPhase: true });
+  f.u.forEach(u => { u.page = 'APPR'; });
+}
+/** characteristic speeds (kt) for the current mass: stall speeds per configuration, VLS, VAPP for the landing configuration, F, S, green dot */
+export function apprSpeeds(f, m = AF.m) {
+  const vs = AF.CLmax.map(c => Math.sqrt(2 * m * 9.80665 / (1.225 * AF.S * c)) / 0.514444);
+  const vls = vs.map(v => Math.round(v * 1.23)), conf = f.ldgConf === 3 ? 3 : 4;
+  const w = f.aWind || { from: 274, kt: 0 }, hw = Math.max(0, w.kt * Math.cos((w.from - 274) * Math.PI / 180));
+  const vapp = f.vappMan || Math.round(vls[conf] + Math.min(15, Math.max(5, hw / 3)));
+  return { vs, vls, vapp, conf, f: Math.round(vs[2] * 1.26), s: Math.round(vs[1] * 1.4), gd: Math.round(vs[0] * 1.38) };
 }
 export const fmsStatus = f => {
   const init = !!(f.from && f.to && f.flt && f.ci != null && f.crz && f.baro), fpln = !!(f.from && f.to && f.depRwy && f.arrRwy), perf = !!(f.v1 && f.vr && f.v2 && f.flex);
@@ -103,11 +125,27 @@ const FIELDS = {
   },
   'F-PLN': {
     L1(f, sp) { if (!f.from) return MSG.na; if (!AIRPORTS[f.from].rwys[sp]) return MSG.db; f.depRwy = sp; },
-    L5(f, sp) { if (!f.to) return MSG.na; if (!AIRPORTS[f.to].rwys[sp]) return MSG.db; f.arrRwy = sp; }
+    L5(f, sp) { if (!f.to) return MSG.na; if (!AIRPORTS[f.to].rwys[sp]) return MSG.db; f.arrRwy = sp; },
+    R6: { page: 'ARR' }
   },
   PERF: {
     L1: (f, sp) => vspd(f, 'v1', sp), L2: (f, sp) => vspd(f, 'vr', sp), L3: (f, sp) => vspd(f, 'v2', sp),
-    R4(f, sp) { if (!/^\d{1,2}$/.test(sp)) return MSG.fmt; const v = +sp; if (v <= OAT || v > 70) return MSG.range; f.flex = v; }
+    R4(f, sp) { if (!/^\d{1,2}$/.test(sp)) return MSG.fmt; const v = +sp; if (v <= OAT || v > 70) return MSG.range; f.flex = v; },
+    R6: { page: 'APPR' }
+  },
+  APPR: {   // simplified PERF APPR: destination QNH, temperature, wind, VAPP (computed, can be overwritten), minimum, landing flaps
+    L1(f, sp) { if (!/^\d{3,4}$/.test(sp)) return MSG.fmt; const v = +sp; if (v < 900 || v > 1100) return MSG.range; f.aQnh = v; },
+    L2(f, sp) { if (!/^-?\d{1,2}$/.test(sp)) return MSG.fmt; f.aTemp = +sp; },
+    L3(f, sp) { const m = /^(\d{3})\/(\d{1,2})$/.exec(sp); if (!m) return MSG.fmt; if (+m[1] > 360) return MSG.range; f.aWind = { from: +m[1] % 360, kt: +m[2] }; },
+    L5(f, sp) { if (!/^\d{3}$/.test(sp)) return MSG.fmt; const v = +sp; if (v < 110 || v > 180) return MSG.range; f.vappMan = v; },
+    R2(f, sp) { if (!/^\d{3,4}$/.test(sp)) return MSG.fmt; f.mda = +sp; f.dh = null; },
+    R3(f, sp) { if (sp === 'NO') { f.dh = null; return; } if (!/^\d{2,3}$/.test(sp)) return MSG.fmt; const v = +sp; if (v > 1000) return MSG.range; f.dh = v; f.mda = null; },
+    R5(f) { f.ldgConf = 3; }, R6(f) { f.ldgConf = 4; }, L6: { page: 'PERF' }, empty: ['R5', 'R6']
+  },
+  ARR: {    // arrival: pick the approach (sets the arrival runway and tunes the ILS)
+    L1(f) { const a = approachList(f)[0]; if (!a) return MSG.na; f.appr = { ...a }; f.arrRwy = a.apt === f.to ? a.rwy : f.arrRwy; },
+    L2(f) { const a = approachList(f)[1]; if (!a) return MSG.na; f.appr = { ...a }; },
+    L6: { page: 'F-PLN' }, empty: ['L1', 'L2']
   }
 };
 function vspd(f, k, sp) {
@@ -121,13 +159,14 @@ export const FMS_PAGES = ['INIT', 'F-PLN', 'PERF'];
 export function fmsKey(sys, unit, key) {
   if (!sys.st.elec.ac) return false;
   const f = sys.st.av.fms, U = f.u[unit];
-  if (FMS_PAGES.includes(key)) { U.page = key; return true; }
+  if (FMS_PAGES.includes(key)) { U.page = key === 'PERF' && f.apprPhase ? 'APPR' : key; return true; }
   if (['DIR', 'PROG', 'DATA', 'RAD NAV', 'FUEL PRED', 'SEC F-PLN', 'ATC COMM', 'MENU'].includes(key)) { U.msg = MSG.notTrainer; return true; }
   if (key === 'CLR') { if (U.msg) U.msg = ''; else U.sp = U.sp.slice(0, -1); return true; }
   if (/^[LR][1-6]$/.test(key)) {
-    const h = (FIELDS[U.page] || {})[key];
+    const P = FIELDS[U.page] || {}, h = P[key];
     if (!h) { if (U.sp) U.msg = MSG.na; return true; }
-    if (!U.sp && !(U.page === 'INIT' && key === 'L1')) return true;
+    if (h.page) { U.page = h.page; return true; }                      // page links (NEXT PHASE, ARRIVAL, RETURN)
+    if (!U.sp && !(U.page === 'INIT' && key === 'L1') && !(P.empty && P.empty.includes(key))) return true;
     const err = h(f, U.sp.trim()); if (err) U.msg = err; else { U.sp = ''; U.msg = ''; }
     return true;
   }
@@ -158,6 +197,24 @@ export function fmsNext(sys, unit = 0) {
   if (!f.flex) return want('PERF', 'R4', '45', 'FLEX TO TEMP');
   return { key: st.all ? null : 'INIT', text: 'All three pages are complete.' };
 }
+
+/** descent preparation on the flight computer (guided mode): ARRIVAL, then PERF APPR. Returns { key, text } */
+export function apprNext(sys, unit = 0) {
+  const f = sys.st.av.fms, U = f.u[unit], go = (page, how) => ({ key: how, text: `Open the ${page} page: ${how === 'R6' ? 'line key R6 on the ' + (page === 'ARRIVAL' ? 'F-PLN' : 'TAKE OFF') + ' page' : 'press ' + how}.` });
+  const want = (page, key, value, text) => {
+    if (U.page !== page) return page === 'APPR' ? (U.page === 'PERF' ? { key: 'R6', text: 'Press NEXT PHASE (line key R6) for PERF APPR.' } : { key: 'PERF', text: 'Press PERF on the flight computer keypad.' }) : null;
+    if (U.msg) return { key: 'CLR', text: `“${U.msg}”: press CLR, then type ${value} again.` };
+    if (value == null || U.sp.trim() === value) return { key, text: `Press the line key next to ${text} (${key[0] === 'L' ? 'left' : 'right'} side, line ${key[1]}).` };
+    return { key: 'keys', text: `Type ${value} into the scratchpad, then press the line key next to ${text}.` };
+  };
+  if (!f.appr || f.appr.apt !== 'ZZAA') { if (U.page === 'ARR') return { key: f.to === 'ZZAA' ? 'L1' : 'L2', text: 'Select ZZAA ILS27R (line key ' + (f.to === 'ZZAA' ? 'L1' : 'L2') + ') — the return to the departure field.' }; if (U.page !== 'F-PLN') return { key: 'F-PLN', text: 'Press F-PLN on the flight computer keypad.' }; return go('ARRIVAL', 'R6'); }
+  if (!f.aQnh) return want('APPR', 'L1', String(QNH_TODAY), 'QNH');
+  if (!f.aWind) return want('APPR', 'L3', '250/8', 'MAG WIND');
+  if (f.dh == null && !f.mda) return want('APPR', 'R3', '200', 'RADIO (decision height)');
+  if (f.ldgConf !== 4) return want('APPR', 'R6', null, 'FULL');
+  return { key: null, text: 'Arrival and PERF APPR are complete.' };
+}
+export const apprReady = f => !!(f.appr && f.appr.apt === 'ZZAA' && f.aQnh && f.aWind && (f.dh != null || f.mda) && f.ldgConf);
 
 /* timers */
 export function avUpdate(sys) {
@@ -191,7 +248,7 @@ export function drawFMS(x, W, H, sys, unit) {
   const label = (side, line, t) => T(t, CC.w, side === 'L' ? 0.4 : 0.4, line * 2 - 1, false, side === 'L' ? 'left' : 'right');
   const data = (side, line, t, col) => T(t, col, 0.3, line * 2, true, side === 'L' ? 'left' : 'right');
   const box = n => '□'.repeat(n);
-  T(U.page === 'PERF' ? 'TAKE OFF' : U.page === 'F-PLN' ? 'FLIGHT PLAN' : 'INIT', CC.w, 12, 0, true, 'center');
+  T(({ PERF: 'TAKE OFF', 'F-PLN': 'FLIGHT PLAN', APPR: 'APPROACH', ARR: 'ARRIVAL' })[U.page] || 'INIT', CC.w, 12, 0, true, 'center');
   if (U.page === 'INIT') {
     label('L', 1, 'CO RTE'); data('L', 1, '----------', CC.w);
     label('R', 1, 'FROM/TO'); data('R', 1, f.from ? `${f.from}/${f.to}` : `${box(4)}/${box(4)}`, f.from ? CC.c : CC.a);
@@ -219,7 +276,28 @@ export function drawFMS(x, W, H, sys, unit) {
     label('R', 3, 'FLAPS'); data('R', 3, ['UP', '1', '2', '3', 'FULL'][sys.sw.flaps] || '-', CC.g);
     label('R', 4, 'FLEX TO TEMP'); data('R', 4, f.flex ? f.flex + '°' : box(2) + '°', f.flex ? CC.c : CC.a);
     label('L', 5, 'TRANS ALT'); data('L', 5, '5000', CC.g);
+    data('R', 6, 'NEXT PHASE>', CC.w);
+  } else if (U.page === 'APPR') {
+    const sp = apprSpeeds(f), wv = f.aWind;
+    label('L', 1, 'QNH'); data('L', 1, f.aQnh ? String(f.aQnh) : box(4), f.aQnh ? CC.c : CC.a);
+    label('L', 2, 'TEMP'); data('L', 2, f.aTemp != null ? f.aTemp + '°' : '---°', f.aTemp != null ? CC.c : CC.a);
+    label('L', 3, 'MAG WIND'); data('L', 3, wv ? `${String(wv.from).padStart(3, '0')}°/${String(wv.kt).padStart(3, '0')}` : '---°/---', wv ? CC.c : CC.a);
+    label('L', 4, 'FINAL'); data('L', 4, f.appr ? f.appr.id : '------', CC.g);
+    label('L', 5, 'VAPP'); data('L', 5, String(sp.vapp), f.vappMan ? CC.c : CC.m);
+    label('R', 1, 'F=' + sp.f + ' S=' + sp.s + ' O=' + sp.gd); data('R', 1, 'VLS ' + sp.vls[sp.conf], CC.g);
+    label('R', 2, 'BARO'); data('R', 2, f.mda ? String(f.mda) : '----', f.mda ? CC.c : CC.grey);
+    label('R', 3, 'RADIO'); data('R', 3, f.dh != null ? String(f.dh) : 'NO', f.dh != null ? CC.c : CC.grey);
+    label('R', 5, 'LDG CONF'); data('R', 5, (f.ldgConf === 3 ? '*' : ' ') + 'CONF3', f.ldgConf === 3 ? CC.c : CC.grey); data('R', 6, (f.ldgConf === 4 ? '*' : ' ') + 'FULL', f.ldgConf === 4 ? CC.c : CC.grey);
+    data('L', 6, '<PREV PHASE', CC.w);
+  } else if (U.page === 'ARR') {
+    const L = approachList(f);
+    label('L', 1, 'APPROACHES ' + (f.to || '')); if (!L.length) T('NONE', CC.grey, 0.3, 2);
+    L.forEach((a, i) => data('L', i + 1, `${f.appr && f.appr.id === a.id && f.appr.apt === a.apt ? '*' : '<'}${a.apt} ${a.id}${a.ret ? ' RTN' : ''}`, f.appr && f.appr.id === a.id && f.appr.apt === a.apt ? CC.g : CC.c));
+    label('R', 1, 'ILS'); if (f.appr) { data('R', 1, `${f.appr.ils}/${f.appr.f.toFixed(2)}`, CC.m); label('R', 2, 'CRS'); data('R', 2, f.appr.crs + '°', CC.m); }
+    T('3D AIRPORT: RWY 27R', CC.grey, 12, 9, false, 'center');
+    data('L', 6, '<F-PLN', CC.w);
   }
+  if (U.page === 'F-PLN' && f.from) data('R', 6, 'ARRIVAL>', CC.w);
   // scratchpad
   T(U.msg || U.sp, U.msg ? CC.a : CC.w, 0.3, 13);
   x.font = `600 ${lh * 0.48}px ${LCDF}`; x.textAlign = 'right'; x.fillStyle = '#1f6f86'; x.fillText('GENERIC · SIMPLIFIED', W - cw * 0.3, 12.5 * lh);

@@ -351,7 +351,7 @@ export default function (host) {
       const id = down.grab.id;
       if (id === 'stickL') { drag.roll = clamp(dx / 70, -1, 1); drag.pitch = clamp(dy / 70, -1, 1); }
       else if (id === 'tiller') drag.tiller = clamp(dx / 80, -1, 1);
-      else { const d = -dy / 70; if (down.shift) sys.setSwitch(id, clamp(down.thr0[id === 'thr1' ? 0 : 1] + d, 0, 3)); else { sys.setSwitch('thr1', clamp(down.thr0[0] + d, 0, 3)); sys.setSwitch('thr2', clamp(down.thr0[1] + d, 0, 3)); } }
+      else { const d = -dy / 70; if (down.shift) sys.setSwitch(id, clamp(down.thr0[id === 'thr1' ? 0 : 1] + d, -1, 3)); else { sys.setSwitch('thr1', clamp(down.thr0[0] + d, -1, 3)); sys.setSwitch('thr2', clamp(down.thr0[1] + d, -1, 3)); } }
       return; }
     if (down && down.id === e.pointerId && down.knob) { // drag on a knob turns it: up or right = clockwise, one detent per 14 px
       const n = Math.trunc(((e.clientX - down.x) - (e.clientY - down.y)) / 14); if (n !== down.steps) { act(down.knob, n - down.steps); down.steps = n; down.moved = true; } return; }
@@ -390,7 +390,7 @@ export default function (host) {
   const FLYKEYS = new Set(['w', 's', 'a', 'd', 'q', 'e', 'z', 'c', 'b', ',', '.', 'g', 'f', 'v', 'p', 'h']);
   const keys = new Set(); const drag = { pitch: 0, roll: 0, tiller: 0 }, touch = { pitch: 0, roll: 0, tiller: 0, brake: 0 }, kb = { pitch: 0, roll: 0, rudder: 0, tiller: 0 };
   let gpName = '';
-  function setThr(v, which = 0) { v = clamp(v, 0, 3); for (const d of [0, 1, 2, 3]) if (Math.abs(v - d) < 0.07) v = d; for (const id of which ? ['thr' + which] : ['thr1', 'thr2']) act({ id }, { to: v }); }
+  function setThr(v, which = 0) { v = clamp(v, -1, 3); for (const d of [-1, 0, 1, 2, 3]) if (Math.abs(v - d) < 0.07) v = d; for (const id of which ? ['thr' + which] : ['thr1', 'thr2']) act({ id }, { to: v }); }
   function flyKey(k, down, e) {
     const kl = k.toLowerCase(); if (down && e && e.repeat && !'wsadqezcb,.'.includes(kl)) return;
     if ('wsadqezcb,.'.includes(kl)) { keys.add(kl); return; }

@@ -2,23 +2,24 @@
    Deterministic, fixed timestep, no three.js (runs in Node for tests).
    Every figure is approximate and generic: written from general public knowledge, not any manufacturer's data. */
 
-import { createAvionics, presetAvionics, avUpdate, fcuRule, FIELD_ELEV } from './avionics.js';
+import { createAvionics, presetAvionics, presetArrival, avUpdate, fcuRule, FIELD_ELEV, apprSpeeds } from './avionics.js';
 import { createFDM, thrustOf, AF, KT, FT } from './fdm.js';
 import { createAutoflight, autoflight, leverN1 } from './autoflight.js';
 import { createChecklists } from './checklists.js';
-import { toSN, RWY, HOLD, TAXI_PATH, nearest, ELEV_FT, WIND } from './layout.js';
+import { toSN, RWY, HOLD, TAXI_PATH, TAXI_IN, STAND14, EXIT, nearest, ELEV_FT, WIND, ilsDev, finalPoint, TDZ } from './layout.js';
 
 export const DT = 1 / 30;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lag = (x, t, tau, dt) => x + (t - x) * (1 - Math.exp(-dt / Math.max(1e-3, tau)));
 const towards = (x, t, rate, dt) => x + clamp(t - x, -rate * dt, rate * dt);
+const D2R = Math.PI / 180;
 export const OAT = 15; // deg C, ISA sea level day
 
 /* Approximate reference figures shown in the UI */
 export const REF = {
   apuStart: 40, apuStartFast: 16, irsAlign: 45, irsAlignFast: 15, irsReal: '6–10 min',
   idleN1: [19.6, 20.2], idleN2: [58.6, 59.3], idleEGT: [418, 436], idleFF: [292, 304],
-  startEGTLimit: 725, startValveCut: 50, ignN2: 16, fuelN2: 18
+  startEGTLimit: 725, startValveCut: 50, ignN2: 16, fuelN2: 18, revMaxN1: 72
 };
 
 /* switch positions for a secured ("cold & dark") aircraft at the stand */
@@ -80,7 +81,9 @@ export function createSystems(opt = {}) {
       fctl: { elev: [-12, -12], ail: [-6, -6], spl: [[0, 0, 0, 0], [0, 0, 0, 0]], rud: 0, seen: {} },
       fdm: null, af: createAutoflight(), inp: { pitch: 0, roll: 0, rudder: 0, tiller: 0, brakeL: 0, brakeR: 0 },
       toCfg: { testT: -99, faults: [], warn: false }, chronoT: -1, stopBar: true, rtoInject: null, callouts: {},
-      mon: { taxiMax: 0, taxiOverT: 0, stopBarRun: false, held: 0, atHold: false, cleared: false, toCl: { max: 0, sum: 0, n: 0 }, rot: null, liftoff: null, flapOver: 0, gearOver: 0, reject: null, stopRemain: null, onRunway: false, lined: false }
+      mon: { taxiMax: 0, taxiOverT: 0, stopBarRun: false, held: 0, atHold: false, cleared: false, toCl: { max: 0, sum: 0, n: 0 }, rot: null, liftoff: null, flapOver: 0, gearOver: 0, reject: null, stopRemain: null, onRunway: false, lined: false,
+        app: { gates: {}, maxLoc: 0, maxGs: 0, below: false, raLast: 9999, apLow: false, p50: null, p30: null }, td: null, roll: null, ga: null, tin: { max: 0, overT: 0, atStand: false, vacated: false } },
+      ils: null, gaInject: null
     };
   }
   sys.st = freshState();
@@ -92,9 +95,11 @@ export function createSystems(opt = {}) {
     if (sys.cl && !opts.keepChecklists) { sys.cl.reset(); sys.clGate = null; }
     sys.t = 0; sys.acc = 0; sys.events.length = 0; sys.fireInject = null;
     sys.sw = coldSwitches(); sys.st = freshState();
+    sys.wx = { from: WIND.from, kt: WIND.kt, wet: false, temp: OAT, ...(opts.wx || {}) };
     sys.st.fdm = fdm; fdm.reset(kind === 'lineup' ? 'lineup' : 'park'); sys.st.brakes = { temp: fdm.brakeT };
-    if (kind === 'beforeStart' || kind === 'stand' || kind === 'lineup') beforeStart();
-    if (kind === 'stand' || kind === 'lineup') enginesRunning(kind);
+    if (kind === 'beforeStart' || kind === 'stand' || kind === 'lineup' || kind === 'approach') beforeStart();
+    if (kind === 'stand' || kind === 'lineup' || kind === 'approach') enginesRunning(kind);
+    if (kind === 'approach') inTheAir(opts.air || {});
     sys.kind = kind;
     update(0);
   };
@@ -127,6 +132,20 @@ export function createSystems(opt = {}) {
     for (let i = 0; i < 5; i++) update(DT);
     s.fdm.u = 0;
   }
+
+  /* airborne on the extended centre line of runway 27R (approach scenarios). o: { dist (NM), alt (ft), ias, flap, gear, ap, spdBrk, autoBrk, appr } */
+  function inTheAir(o) {
+    const w = sys.sw, s = sys.st, Fd = s.fdm, fp = finalPoint(o.dist ?? 12), alt = o.alt ?? 3000;
+    Fd.setAir({ x: fp.x, z: fp.z, h: (alt - ELEV_FT) * FT, yaw: fp.yaw, ias: o.ias ?? 220, flap: o.flap || 0, gear: !!o.gear, gamma: o.gamma || 0 });
+    Object.assign(w, { parkBrk: false, flaps: o.flap || 0, gearLever: o.gear ? 'DN' : 'UP', spdBrk: o.spdBrk || 0, autoBrk: o.autoBrk || 0, strobe: 2, landL: 2, landR: 2, nose: 0, xpdr: 2, seatBelts: 1,
+      thr1: 1, thr2: 1, athr: o.athr !== false, ap1: !!(o.ap ?? true), fdL: o.fd !== false, fdR: o.fd !== false, lsL: !!o.ls, lsR: !!o.ls, appr: !!o.appr, ndModeL: o.ls ? 'LS' : 'ARC' });
+    presetArrival(s.av, o);
+    const F = s.av.fcu; Object.assign(F, { alt: o.fcuAlt ?? Math.round(alt / 100) * 100, altMan: true, hdg: 274, hdgMan: false, spd: Math.round(o.ias ?? 220), spdMan: o.managed !== false, vsMode: false });
+    s.af.phase = o.phase || 'APPR'; s.af.vert = o.vert || 'ALT'; s.af.lat = 'HDG';
+    s.stopBar = false; s.mon.cleared = true; s.doors.fwdL = 0; s.doors.bridge = false; s.toCfg.testT = -100; s.chronoT = -1;
+    s.eng.forEach((e, i) => { e.n1 = 52; e.n2 = REF.idleN2[i] + (52 - REF.idleN1[i]) * 0.52; });
+  }
+  sys.inTheAir = inTheAir;
 
   /* ---------------- momentary actions ---------------- */
   sys.press = (id) => {
@@ -320,8 +339,14 @@ export function createSystems(opt = {}) {
       e.fadec = E.dc && (w.engMode !== 'NORM' || master || e.n2 > 5);
       // N1 command from the thrust lever (or the autothrust within the lever limit); thrust follows N1 with spool-up lag
       const Fd = s.fdm, af = s.af, L = w['thr' + n];
-      let n1Cmd = leverN1(L, REF.idleN1[i], s.av.fms.flex, Fd.alt);
+      let n1Cmd = leverN1(Math.max(0, L), REF.idleN1[i], s.av.fms.flex, Fd.alt);
       if (af.athrActive && af.n1c != null) n1Cmd = Math.max(REF.idleN1[i], Math.min(n1Cmd, af.n1c + (REF.idleN1[i] - 20) * 0));
+      // thrust reverser: lever below idle, on the ground only; the doors take about 1.5 s, then reverse N1 follows the lever
+      const revTgt = L < -0.02 && (Fd.onGround || Fd.ra < 3) && e.running ? 1 : 0, rev0 = e.rev || 0;
+      e.rev = towards(rev0, revTgt, 1 / 1.5, dt);
+      if (rev0 < 1 && e.rev >= 1) emit('revDeployed', { i }); if (rev0 === 0 && e.rev > 0) emit('revUnlock', { i });
+      if (L < -0.02) n1Cmd = e.rev >= 0.98 ? REF.idleN1[i] + (REF.revMaxN1 - REF.idleN1[i]) * Math.min(1, -L) : REF.idleN1[i];
+      else if (e.rev > 0.02) n1Cmd = REF.idleN1[i];
       e.n1Cmd = n1Cmd;
       const tl = clamp((e.n1 - REF.idleN1[i]) / (92 - REF.idleN1[i]), 0, 1.05);
       const duct = B.duct[i];
@@ -368,7 +393,7 @@ export function createSystems(opt = {}) {
       // N1 follows N2 once the core is burning
       const n1T = e.lit ? (e.phase === 'RUN' ? idleN1 + tl * 64 : idleN1 * Math.pow(clamp((e.n2 - 20) / (idleN2 - 20), 0, 1), 1.5)) : Math.max(0, e.n2 * 0.05 - 0.3);
       if (e.phase !== 'RUN') e.n1 = lag(e.n1, n1T, e.lit ? 1.6 : 5, dt);
-      e.thrust = e.running || e.phase === 'SPOOL' ? thrustOf(e.n1, ELEV_FT * FT + Fd.h, Fd.tas * KT / 340) * (e.n1 > idleN1 - 3 ? 1 : 0.3) : 0;
+      e.thrust = e.running || e.phase === 'SPOOL' ? thrustOf(e.n1, ELEV_FT * FT + Fd.h, Fd.tas * KT / 340) * (e.n1 > idleN1 - 3 ? 1 : 0.3) * (1 - 1.45 * (e.rev || 0)) : 0;
       // EGT: rise at light-off, start peak, then idle (approximate)
       const peak = 595 + (1 - clamp(f, 0, 1)) * 230;
       let egtT;
@@ -490,7 +515,8 @@ export function createSystems(opt = {}) {
     const st = sys.stick();
     const thrIdle = w.thr1 < 0.05 && w.thr2 < 0.05;
     Fd.step(dt, { T: [s.eng[0].thrust || 0, s.eng[1].thrust || 0], pitch: st.pitch, roll: st.roll, rudder: i.rudder, tiller: i.tiller, brakeL: i.brakeL, brakeR: i.brakeR,
-      park: w.parkBrk && s.hyd.accu > 500, flapLever: w.flaps, gearDown: w.gearLever !== 'UP', spoilerArmed: !!w.spdBrk, autoBrk: w.autoBrk, thrIdle, ap: g.ap, wind: WIND });
+      park: w.parkBrk && s.hyd.accu > 500, flapLever: w.flaps, gearDown: w.gearLever !== 'UP', spoilerArmed: w.spdBrk === 1, sbLever: w.spdBrk >= 2 ? (w.spdBrk - 1) / 2 : 0, autoBrk: w.autoBrk, thrIdle, ap: g.ap,
+      wind: sys.wx || WIND, wet: !!(sys.wx && sys.wx.wet), toga: Math.max(w.thr1, w.thr2) >= 1.94 });
     for (const e of Fd.events) emit(e.type, e); Fd.events.length = 0;
     if (w.gearLever === 'UP' && Fd.onGround) w.gearLever = 'DN';      // gear lever is locked down on the ground
     // take-off thrust with a wrong configuration: red T.O CONFIG warning
@@ -515,7 +541,7 @@ export function createSystems(opt = {}) {
     // take-off roll: centre-line, callouts, rotation, lift-off, limits
     const v1 = s.av.fms.v1 || 135, vr = s.av.fms.vr || 140, toRoll = Fd.onGround && onRwy && Math.min(w.thr1, w.thr2) >= 0.9;
     if (Fd.onGround && onRwy && Fd.gs > 30) { const d = Math.abs(sn.n - RWY.n); M.toCl.max = Math.max(M.toCl.max, d); M.toCl.sum += d * d; M.toCl.n++; }
-    if (toRoll || (Fd.onGround && onRwy && Fd.ias > 60 && !M.reject)) {
+    if (!Fd.landed && (toRoll || (Fd.onGround && onRwy && Fd.ias > 60 && !M.reject))) {
       const co = (k, v, t) => { if (!C[k] && Fd.ias >= v) { C[k] = true; emit('callout', { text: t }); } };
       if (!M.reject) { co('100', 100, '100 knots'); co('v1', v1, 'V1'); co('vr', vr, 'Rotate'); }
     }
@@ -531,6 +557,74 @@ export function createSystems(opt = {}) {
     if (R && !R.fired && Fd.onGround && Fd.ias >= R.ias) { R.fired = true; R.t = sys.t; emit('rtoWarn'); }
     if (R && R.fired && !M.reject && w.thr1 < 0.05 && w.thr2 < 0.05) M.reject = { ias: Fd.ias, t: sys.t, dt: sys.t - R.t, v1 };
     if (M.reject && Fd.gs < 0.5 && M.stopRemain == null) M.stopRemain = { s: RWY.s1 - sn.s, on: onRwy, t: sys.t };
+    approach(dt, sn, onRwy);
+  }
+  /* approach and landing: radio-altitude callouts, minimum, RETARD, stabilised-approach gates, touchdown, roll-out, go-around, taxi in */
+  const RA_CALLS = [[2500, 'Twenty five hundred'], [1000, 'One thousand'], [500, 'Five hundred'], [100, 'One hundred'], [50, 'Fifty'], [40, 'Forty'], [30, 'Thirty'], [20, 'Twenty'], [10, 'Ten']];
+  function approach(dt, sn, onRwy) {
+    const w = sys.sw, s = sys.st, Fd = s.fdm, M = s.mon, P = M.app, C = s.callouts, A = s.af, fm = s.av.fms, ils = s.ils;
+    const co = (k, text, extra = {}) => { if (!C[k]) { C[k] = true; emit('callout', { text, kind: 'ra', ...extra }); } };
+    const ra = Fd.ra, vsF = Fd.vs / FT * 60, appr = A.phase === 'APPR' && !Fd.onGround && Fd.gear > 0.5;
+    if (appr && vsF < 0) {
+      for (const [h, t] of RA_CALLS) if (P.raLast > h && ra <= h) { if (h === 20 && Math.max(w.thr1, w.thr2) > 0.04) co('ra20', 'Retard', { retard: true }); else co('ra' + h, t); }
+      // minimum: decision height (radio) or minimum descent altitude (baro)
+      const above = fm.dh != null ? ra - fm.dh : fm.mda ? Fd.alt - fm.mda : null;
+      if (above != null && above <= 100 && above > 0 && P.lastAbove > 100) co('hundredAbove', 'Hundred above');
+      if (above != null && above <= 0 && P.lastAbove > 0) { co('minimum', 'Minimum'); P.minT = sys.t; }
+      P.lastAbove = above;
+      // autopilot still engaged below about 100 ft (no autoland)
+      if ((w.ap1 || w.ap2) && ra < 90) P.apLow = true;
+      // stabilised-approach gates at 1000 ft and 500 ft above the runway
+      for (const g of [1000, 500]) if (P.raLast > g && ra <= g && !P.gates[g]) {
+        const vapp = apprSpeeds(fm).vapp, dv = Fd.ias - vapp, conf = Math.round(Fd.flap) >= (fm.ldgConf === 3 ? 3 : 4) && Fd.gear > 0.99;
+        const G = { ias: Math.round(Fd.ias), vapp, dv: Math.round(dv), loc: ils ? ils.loc : null, gs: ils ? ils.gs : null, conf, flap: Math.round(Fd.flap), gear: Fd.gear > 0.99, fpm: Math.round(-vsF) };
+        G.ok = { spd: dv >= -5 && dv <= 10, gs: G.gs == null || Math.abs(G.gs) <= 1, loc: G.loc == null || Math.abs(G.loc) <= 1, conf, sink: -vsF < 1000 };
+        G.stable = Object.values(G.ok).every(Boolean); P.gates[g] = G; emit('gate', { h: g, stable: G.stable });
+      }
+      if (ra < 1000 && ils) { P.maxLoc = Math.max(P.maxLoc, Math.abs(ils.loc)); if (ils.gsValid) P.maxGs = Math.max(P.maxGs, Math.abs(ils.gs)); }
+      if (ra < 50 && !P.p50) P.p50 = { s: sn.s, t: sys.t, ias: Fd.ias };
+      if (ra < 30 && !P.p30) P.p30 = { s: sn.s, t: sys.t, ias: Fd.ias, pitch: Fd.pitch / D2R };
+      if (ra < 30 && P.p30) P.maxPitchFlare = Math.max(P.maxPitchFlare || 0, Fd.pitch / D2R);
+    }
+    if (!Fd.onGround) P.raLast = ra;
+    // the injected go-around (runway incursion) below about 200 ft
+    const GI = s.gaInject; if (GI && !GI.fired && appr && ra < GI.ra) { GI.fired = true; GI.t = sys.t; emit('gaCall', { ra }); emit('callout', { text: 'Go around — runway incursion', kind: 'atc', warn: true }); }
+    // touchdown, roll-out, reverse and braking, nose gear, stop
+    if (Fd.td && !M.td) {
+      const T = Fd.td; M.td = { ...T, tdz: T.s - RWY.s0, cl: T.n - RWY.n, float: P.p50 ? T.s - P.p50.s : null, flareT: P.p30 ? sys.t - P.p30.t : null, onRwy, apLow: P.apLow, vapp: apprSpeeds(fm).vapp };
+      M.roll = { s0: T.s, maxRev: 0, revKt: null, revIdleKt: null, maxDecel: 0, ab: w.autoBrk, stopS: null, maxCl: 0, spoilers: false, noseT: null, t0: sys.t };
+    }
+    const R = M.roll;
+    if (R && Fd.onGround) {
+      const rev = Math.max(...s.eng.map(e => e.rev || 0)), revN1 = Math.max(...s.eng.map(e => (e.rev || 0) > 0.9 ? e.n1 : 0));
+      if (rev > 0.9 && R.revKt == null) R.revKt = Fd.ias; R.maxRev = Math.max(R.maxRev, revN1);
+      if (R.maxRev > 50 && R.revIdleKt == null && revN1 < 40 && rev > 0.5) R.revIdleKt = Fd.ias;
+      if (R.revIdleKt == null && R.maxRev > 50 && Fd.ias < 60 && revN1 > 50) R.revLow = true;
+      if (Fd.spoiler > 0.8) R.spoilers = true;
+      if (Fd.noseT >= 0 && R.noseT == null) R.noseT = Fd.noseT;
+      if (Fd.gs > 30) R.maxDecel = Math.max(R.maxDecel, Fd.decel);
+      if (onRwy && R.stopS == null) R.maxCl = Math.max(R.maxCl, Math.abs(sn.n - RWY.n));
+      if (R.stopS == null && (Fd.gs < 3 || !onRwy)) { R.stopS = sn.s; R.dist = sn.s - R.s0; R.t = sys.t - R.t0; R.left = RWY.s1 - sn.s; R.offRwy = !onRwy && Fd.gs >= 3; }
+    }
+    // go-around execution
+    if (A.phase === 'GA' && !M.ga) M.ga = { t: sys.t, ra, ias: Fd.ias, call: GI && GI.fired ? sys.t - GI.t : null, minRa: ra, maxPitch: 0, posT: null, gearT: null, flapT: null, flap0: w.flaps, fma: false };
+    const GA = M.ga;
+    if (GA && !Fd.onGround) {
+      GA.minRa = Math.min(GA.minRa, ra); GA.maxPitch = Math.max(GA.maxPitch, Fd.pitch / D2R);
+      if (GA.posT == null && Fd.vs > 1.5 && ra > GA.minRa + 30) GA.posT = sys.t - GA.t;
+      if (GA.gearT == null && w.gearLever === 'UP') GA.gearT = sys.t - GA.t;
+      if (GA.flapT == null && w.flaps < GA.flap0) GA.flapT = sys.t - GA.t;
+      if (A.vert === 'SRS' && A.lat === 'GA TRK') GA.fma = true;
+    }
+    if (GI && GI.fired && !GA && Fd.onGround && !M.gaMissed) M.gaMissed = true;
+    // taxi in: speed off the runway, vacated, at the stand (main gear on the stop mark, nose to the terminal)
+    if (M.td && Fd.onGround) {
+      const T = M.tin; if (!onRwy && Fd.gs > 0.5) { T.vacated = true; T.max = Math.max(T.max, Fd.gs); if (Fd.gs > 30) T.overT += dt; }
+      const rt = nearest(TAXI_IN, sn.s, sn.n); T.route = rt;
+      const hdgOk = Math.abs(((Fd.hdg - 184) + 540) % 360 - 180) < 8;
+      T.standD = Math.hypot(sn.s - STAND14.s, sn.n - STAND14.n);
+      T.atStand = T.standD < 2.5 && Fd.gs < 0.5 && hdgOk;
+    }
   }
 
   function alerts(dt) {
@@ -580,7 +674,12 @@ export function createSystems(opt = {}) {
       if (w.noSmoking) M.push({ t: 'NO SMOKING SIGN ON', c: 'g' });
       if (w.parkBrk) M.push({ t: 'PARKING BRAKE SET', c: 'g' });
       if (!w.crewOxy) M.push({ t: 'CREW OXY SUPPLY OFF', c: 'a' });
-      if (w.spdBrk) M.push({ t: 'GROUND SPOILERS ARMED', c: 'g' });
+      if (w.spdBrk === 1) M.push({ t: 'GROUND SPOILERS ARMED', c: 'g' });
+      if (w.spdBrk >= 2 && !s.fdm.onGround) M.push({ t: 'SPEED BRAKE', c: s.fdm.flap > 2.5 || Math.max(w.thr1, w.thr2) > 1.06 ? 'a' : 'g' });
+      if ((w.autoBrk === 1 || w.autoBrk === 2) && !(s.fdm.onGround && !s.fdm.landed)) M.push({ t: w.autoBrk === 1 ? 'AUTO BRK LO' : 'AUTO BRK MED', c: 'g' });
+      if (s.eng.some(e => (e.rev || 0) > 0.05)) M.push({ t: 'REVERSE', c: s.eng.every(e => (e.rev || 0) > 0.98) ? 'g' : 'a' });
+      // landing memo below 2000 ft on the approach (our wording): blue items still to do, green when done
+      if (!s.fdm.onGround && s.fdm.ra < 2000 && s.af.phase === 'APPR') { const L = ldgMemo(); M.unshift({ t: 'LDG MEMO', c: 'w', items: L }); }
     }
     // master warning / caution latch
     const ids = new Set(A.map(a => a.id));
@@ -594,6 +693,10 @@ export function createSystems(opt = {}) {
     s.alerts = A; s.memos = M;
   }
 
+  /** landing memo items: { t, done } (generic wording) */
+  function ldgMemo() { const w = sys.sw, Fd = sys.st.fdm, conf = sys.st.av.fms.ldgConf === 3 ? 3 : 4;
+    return [{ t: 'GEAR DN', done: Fd.gear > 0.99 && w.gearLever === 'DN' }, { t: 'SIGNS ON', done: w.seatBelts >= 1 && w.noSmoking >= 1 }, { t: 'SPLRS ARM', done: w.spdBrk === 1 }, { t: conf === 4 ? 'FLAPS FULL' : 'FLAPS 3', done: w.flaps === conf }]; }
+  sys.ldgMemo = ldgMemo;
   function pages() {
     const w = sys.sw, s = sys.st;
     let auto = 'ELEC';

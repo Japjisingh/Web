@@ -48,9 +48,9 @@ export const CTL = {
   // PEDESTAL
   master1: { k: 'master', sw: 'master1', name: 'ENG 1 MASTER' }, master2: { k: 'master', sw: 'master2', name: 'ENG 2 MASTER' },
   engMode: { k: 'rot', sw: 'engMode', pos: ['CRANK', 'NORM', 'IGN'], labels: ['CRANK', 'NORM', 'IGN/START'], name: 'ENG MODE selector' },
-  thr1: { k: 'lever', sw: 'thr1', pos: [0, 1, 2, 3], labels: ['IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 1' }, thr2: { k: 'lever', sw: 'thr2', pos: [0, 1, 2, 3], labels: ['IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 2' },
+  thr1: { k: 'lever', sw: 'thr1', pos: [-1, 0, 1, 2, 3], labels: ['MAX REV', 'IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 1' }, thr2: { k: 'lever', sw: 'thr2', pos: [-1, 0, 1, 2, 3], labels: ['MAX REV', 'IDLE', 'CL', 'FLX/MCT', 'TOGA'], name: 'Thrust lever 2' },
   parkBrk: { k: 'pb', sw: 'parkBrk', name: 'PARKING BRAKE handle' }, flaps: { k: 'lever', sw: 'flaps', pos: [0, 1, 2, 3, 4], labels: ['0', '1', '2', '3', 'FULL'], name: 'FLAPS lever' },
-  spdBrk: { k: 'lever', sw: 'spdBrk', pos: [0, 1], labels: ['RET', 'ARM'], name: 'SPEED BRAKE lever' }, xpdr: { k: 'rot', sw: 'xpdr', pos: [0, 1, 2], labels: ['STBY', 'AUTO', 'ON'], name: 'Transponder mode' },
+  spdBrk: { k: 'lever', sw: 'spdBrk', pos: [0, 1, 2, 3], labels: ['RET', 'ARM', '1/2', 'FULL'], name: 'SPEED BRAKE lever (ARM: ground spoilers; 1/2, FULL: speed brakes in flight)' }, xpdr: { k: 'rot', sw: 'xpdr', pos: [0, 1, 2], labels: ['STBY', 'AUTO', 'ON'], name: 'Transponder mode' },
   autoBrkLo: { k: 'sel', sw: 'autoBrk', val: 1, toggle: true, name: 'AUTO BRK LO (landing)' }, autoBrkMed: { k: 'sel', sw: 'autoBrk', val: 2, toggle: true, name: 'AUTO BRK MED (landing)' },
   autoBrkMax: { k: 'sel', sw: 'autoBrk', val: 3, toggle: true, name: 'AUTO BRK MAX (take-off: maximum braking if the take-off is rejected above about 72 kt)' },
   toConfig: { k: 'mom', press: 'toConfig', name: 'T.O CONFIG test (flaps, speed brake, brakes)' }, push: { k: 'mom', press: 'push', name: 'Call for pushback' },
@@ -68,8 +68,8 @@ export const CTL = {
   vsKnob: { k: 'knob', knob: 'vs', name: 'V/S / FPA knob', push: 'level off (V/S 0)', pull: 'V/S engaged', ...F },
   spdMach: { k: 'avp', press: 'spdMach', name: 'SPD/MACH toggle', ...F }, hdgTrk: { k: 'avp', press: 'hdgTrk', name: 'HDG-V/S / TRK-FPA toggle', ...F },
   altInc: { k: 'rot', sw: 'altInc', pos: [100, 1000], labels: ['100 ft', '1000 ft'], name: 'ALT knob increment', ...F },
-  ap1: pb('ap1', 'AP 1 (logic only on the ground: the trainer has no flight model)', F), ap2: pb('ap2', 'AP 2 (logic only on the ground: the trainer has no flight model)', F),
-  athr: pb('athr', 'A/THR (logic only on the ground)', F), loc: pb('loc', 'LOC (arms the localizer mode)', F), appr: pb('appr', 'APPR (arms the approach modes)', F), exped: pb('exped', 'EXPED', F),
+  ap1: pb('ap1', 'AP 1 (autopilot; engages above about 100 ft)', F), ap2: pb('ap2', 'AP 2 (both autopilots with APPR armed)', F),
+  athr: pb('athr', 'A/THR (autothrust)', F), loc: pb('loc', 'LOC (arms the localizer mode)', F), appr: pb('appr', 'APPR (arms the approach modes)', F), exped: pb('exped', 'EXPED', F),
   // displays / gauges (touch only)
   pfd: { k: 'ind', name: 'Primary flight display' }, nd: { k: 'ind', name: 'Navigation display' }, ewd: { k: 'ind', name: 'ENGINE & WARNING display' }, sd: { k: 'ind', name: 'SYSTEMS display' },
   stby: { k: 'ind', name: 'Standby instrument' }, clock: { k: 'ind', name: 'Clock' }, brakeGauge: { k: 'ind', name: 'Brake and accumulator pressure' },
