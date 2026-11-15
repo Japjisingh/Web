@@ -12,7 +12,7 @@ export const HDG0 = 309;                                     // compass heading 
 export const YAW_RWY = TH;                                   // scene yaw of +U
 export const ELEV_FT = 420;                                  // field elevation
 export const QNH = 1009;
-export const WIND = { from: 250, kt: 8 };                    // steady wind from the weather report
+export const WIND = { from: 250, kt: 8 };                    // default steady wind from the weather report (scenarios set sys.wx)
 export const METAR = 'ZZAA 250/08KT 9999 FEW030 15/09 Q1009';
 /* airframe reference: main-gear point on the ground (body origin), cockpit floor origin relative to it */
 export const COCKPIT = { y: 3.4, z: -15.3 };
@@ -31,7 +31,7 @@ export const toEN = (x, z) => ({ e: STAND_EN.e + (x * EAST.x + z * EAST.z) / 185
 
 /* ---- runway, taxiway, holding point ---- */
 export const RWY = { n: 200, s0: -600, s1: 2700, w: 45 };     // 3300 m x 45 m, threshold 27R at s0
-export const TWY = { n: 62, s0: -620, s1: 900, w: 23 };
+export const TWY = { n: 62, s0: -620, s1: 1300, w: 23 };
 export const HOLD = { s: -570, n: 140 };                      // stop bar across the link to the runway
 /* parked main-gear point and heading (airport-frame angle) */
 export const PARK = { ...toSN(0, -COCKPIT.z), a: TH };        // nose 35° from +s towards +n (yaw 0)
@@ -65,3 +65,38 @@ export function nearest(path, s, n) {
   }
   best.total = along; return best;
 }
+
+/* ---- arrival: ILS and PAPI for runway 27R (the landing runway is the take-off runway, landing along +s) ----
+   glide path 3°, glide path origin (and PAPI) 350 m past the threshold, localiser antenna 300 m beyond the far end.
+   Deviation in dots: localiser 1 dot = 0.8°, glide slope 1 dot = 0.35° (approximate, generic). */
+export const ILS = { gpip: RWY.s0 + 350, deg: 3, locS: RWY.s1 + 300, crs: 274, locDot: 0.8, gsDot: 0.35, antH: 4 };
+export const PAPI = { s: RWY.s0 + 350, n0: RWY.n - 23.5 - 15, dn: -9, ang: [3.5, 3 + 1 / 6, 2 + 5 / 6, 2.5] };   // box 0 nearest the runway
+export const TDZ = { s0: RWY.s0 + 150, s1: RWY.s0 + 900 };   // touchdown zone (scoring): 150–900 m past the threshold
+/** ILS deviations for the main-gear point at scene x, z and height h (m): loc (+ = right of course), gs (+ = above), dots */
+export function ilsDev(x, z, h) {
+  const sn = toSN(x, z), dl = ILS.locS - sn.s, dg = ILS.gpip - sn.s;
+  const loc = Math.atan2(sn.n - RWY.n, Math.max(1, dl)) / D2R / ILS.locDot;
+  const gsAng = Math.atan2(h + ILS.antH, Math.max(1, dg)) / D2R;
+  return { loc, gs: (gsAng - ILS.deg) / ILS.gsDot, gsValid: dg > 250, locValid: dl > 200 && Math.abs(loc) < 6, gsAng, distNM: (RWY.s0 - sn.s) / 1852, dGpip: dg, sn,
+    /** height of the glide path above the runway at this point (m, for the main gear) */
+    pathH: Math.max(0, dg * Math.tan(ILS.deg * D2R) - ILS.antH), hErr: h + ILS.antH - Math.max(0, dg) * Math.tan(ILS.deg * D2R), yErr: sn.n - RWY.n };
+}
+/** PAPI colours seen from an eye at scene x, z and height above the runway (m): 'W' or 'R' per box, nearest the runway first */
+export function papiAt(x, z, eyeH) { const sn = toSN(x, z); return PAPI.ang.map((a, i) => { const d = Math.hypot(PAPI.s - sn.s, PAPI.n0 + PAPI.dn * i - sn.n); return Math.atan2(eyeH - 0.9, Math.max(1, d)) / D2R > a ? 'W' : 'R'; }); }
+/** a point on the extended centre line, distNM before the threshold */
+export const finalPoint = distNM => ({ ...P(RWY.s0 - distNM * 1852, RWY.n), yaw: yawOfA(0) });
+
+/* ---- taxi in: runway exit at s 1250 (left, 90°), back along the parallel taxiway, right into stand 14 (nose to the terminal) ---- */
+export const EXIT = { s: 1250 };
+export const STAND14 = { s: 208, n: 27 };                       // main-gear stop position, heading -n
+export const TAXI_IN = (() => {
+  const p = [{ s: 600, n: RWY.n }];
+  p.push(...line(p[p.length - 1], { s: 1220, n: RWY.n }, 6));
+  p.push(...arc({ s: 1220, n: RWY.n - 30 }, 30, Math.PI / 2, 0));          // left off the runway (heading -n)
+  p.push(...line(p[p.length - 1], { s: 1250, n: TWY.n + 30 }));
+  p.push(...arc({ s: 1220, n: TWY.n + 30 }, 30, 0, -Math.PI / 2));          // left onto the taxiway (heading -s)
+  p.push(...line(p[p.length - 1], { s: STAND14.s + 30, n: TWY.n }));
+  p.push(...arc({ s: STAND14.s + 30, n: TWY.n - 30 }, 30, Math.PI / 2, Math.PI));   // right into the stand (heading -n)
+  p.push(...line(p[p.length - 1], { s: STAND14.s, n: STAND14.n - 6 }, 2));
+  return p;
+})();
